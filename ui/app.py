@@ -21,16 +21,13 @@ inject_theme()
 
 page = render_sidebar()
 
-# --- Page Router ---
-if page == "仪表盘":
-    dashboard.show()
-elif page == "情报列表":
-    intel_list.show()
-elif page == "实体库":
-    entities.show()
-elif page == "知识图谱":
-    graph.show()
-elif page == "作弊剧本":
-    cheat_scripts.show()
-elif page == "黑话词典":
-    slang_dict.show()
+ROUTES = {
+    "dashboard":     dashboard.show,
+    "intel_list":    intel_list.show,
+    "entities":      entities.show,
+    "graph":         graph.show,
+    "cheat_scripts": cheat_scripts.show,
+    "slang_dict":    slang_dict.show,
+}
+
+ROUTES.get(page, dashboard.show)()
