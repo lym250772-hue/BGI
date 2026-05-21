@@ -65,11 +65,13 @@ def show():
 
     # Build category-tabbed view
     available_cats = sorted({s.get("category", "") for s in rows})
-    tabs = st.tabs(["全部"] + available_cats)
+    tab_labels = ["全部"] + available_cats
+    tabs = st.tabs(tab_labels)
 
-    for i, tab_name in enumerate(tabs):
-        with tab_name:
-            subset = rows if tab_name == "全部" else [s for s in rows if s.get("category") == tab_name]
+    for i, tab in enumerate(tabs):
+        label = tab_labels[i]
+        with tab:
+            subset = rows if label == "全部" else [s for s in rows if s.get("category") == label]
             if not subset:
                 st.caption("暂无此类数据")
                 continue
@@ -83,7 +85,7 @@ def show():
 
             st.dataframe(
                 df,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "黑话": st.column_config.TextColumn(width="small"),

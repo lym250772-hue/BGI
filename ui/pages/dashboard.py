@@ -68,7 +68,7 @@ def show():
         dist = s.get("label_distribution", {})
         if dist:
             df = pd.DataFrame(dist.items(), columns=["类型", "数量"]).sort_values("数量", ascending=False)
-            st.bar_chart(df.set_index("类型"), use_container_width=True)
+            st.bar_chart(df.set_index("类型"), width="stretch")
         else:
             st.markdown(T.empty("📊", "暂无分类数据", "采集并分析情报后自动展示"), unsafe_allow_html=True)
 

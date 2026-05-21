@@ -52,7 +52,7 @@ with st.sidebar:
             f"  {icon}   {label}",
             key=f"nav_{nid}",
             type="primary" if is_on else "secondary",
-            use_container_width=True,
+            width="stretch",
         ):
             st.session_state.nav_page = nid
             st.rerun()
@@ -75,13 +75,4 @@ ROUTES = {
     "slang_dict":    slang_dict.show,
 }
 
-try:
-    ROUTES.get(page, dashboard.show)()
-except Exception as exc:
-    st.markdown(
-        f"""<div class="empty-state">
-        <div class="icon">⚠️</div>
-        <div class="title">页面加载失败</div>
-        <div class="desc">{exc}</div></div>""",
-        unsafe_allow_html=True,
-    )
+ROUTES.get(page, dashboard.show)()

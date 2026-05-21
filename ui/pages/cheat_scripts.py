@@ -102,7 +102,7 @@ def show():
     ex_cols = st.columns(len(EXAMPLES))
     for i, ex in enumerate(EXAMPLES):
         with ex_cols[i]:
-            if st.button(ex, key=f"ex_{ex}", use_container_width=True):
+            if st.button(ex, key=f"ex_{ex}", width="stretch"):
                 st.session_state.cheat_kw = ex
                 st.rerun()
 
@@ -119,7 +119,7 @@ def show():
             key="cheat_kw",
         )
     with c2:
-        go = st.button("生成剧本", type="primary", use_container_width=True, key="cheat_go")
+        go = st.button("生成剧本", type="primary", width="stretch", key="cheat_go")
 
     # Handle generate
     if go and kw:

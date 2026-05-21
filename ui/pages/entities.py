@@ -49,11 +49,13 @@ def show():
 
     # Tabs by type
     types = sorted({e["entity_type"] for e in all_ents})
-    tabs = st.tabs(["全部"] + types)
+    tab_labels = ["全部"] + types
+    tabs = st.tabs(tab_labels)
 
-    for i, tab_name in enumerate(tabs):
-        with tab_name:
-            subset = all_ents if tab_name == "全部" else [e for e in all_ents if e["entity_type"] == tab_name]
+    for i, tab in enumerate(tabs):
+        label = tab_labels[i]
+        with tab:
+            subset = all_ents if label == "全部" else [e for e in all_ents if e["entity_type"] == label]
             if not subset:
                 st.caption("暂无此类实体")
                 continue
@@ -65,4 +67,4 @@ def show():
                 "上下文": (e.get("context") or "")[:60],
                 "时间":   str(e.get("created_at", ""))[:19] if e.get("created_at") else "",
             } for e in subset])
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width="stretch", hide_index=True)
