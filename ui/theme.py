@@ -1,16 +1,11 @@
-"""BGI Design System — Editorial Intelligence Bureau aesthetic.
-
-Follows frontend-design skill workflow:
-  Frame → Visual System → Compose with intention → Meaningful motion
-  Direction: "Editorial" — classified intelligence dossier, institutional warmth.
-"""
+"""BGI Design System — Editorial Intelligence Bureau aesthetic."""
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 WHITE      = "#FFFFFF"
-BG_BASE    = "#F4F0EA"
-BG_CARD    = "#FBF9F5"
-BG_SIDEBAR = "#EDE8E0"
-TEXT_MAIN  = "#2D2A25"
+BG_BASE    = "#F8F6F2"
+BG_CARD    = "#FEFDFB"
+BG_SIDEBAR = "#F0EDE7"
+TEXT_MAIN  = "#1F1D19"
 TEXT_SOFT  = "#5C5852"
 TEXT_MUTED = "#8A857D"
 SAGE       = "#7D9378"
@@ -18,8 +13,8 @@ SAGE_DARK  = "#5F765B"
 SLATE      = "#6D7D8E"
 ROSE       = "#BEA09D"
 ROSE_DARK  = "#9E7A77"
-BORDER     = "#D5CFC5"
-DIVIDER    = "#E4DDD3"
+BORDER     = "#D8D2C8"
+DIVIDER    = "#E8E2D7"
 GOLD       = "#B8976A"
 INK        = "#1E1B18"
 
@@ -33,60 +28,117 @@ CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@400;500;600;700&family=Work+Sans:wght@350;450;550&display=swap');
 
-* {{ font-family: '{FONT_BODY}', system-ui, sans-serif; }}
-
-/* ═══ Entrance animation ═══ */
-@keyframes fade-up {{
-    from {{ opacity: 0; transform: translateY(12px); }}
-    to   {{ opacity: 1; transform: translateY(0); }}
-}}
-@keyframes fade-in {{
-    from {{ opacity: 0; }}
-    to   {{ opacity: 1; }}
-}}
-.stMain > div > div > div > div {{
-    animation: fade-up 0.55s cubic-bezier(0.22, 0.61, 0.36, 1);
-}}
-
 /* ═══ Shell ═══ */
 .stApp {{
     background: {BG_BASE};
-    background-image:
-        url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
 }}
-header[data-testid="stHeader"] {{ background: transparent !important; box-shadow: none !important; border-bottom: 1px solid {DIVIDER}; }}
-[data-testid="stToolbar"], #MainMenu, footer, .viewerBadge_container__r5tak {{ display: none !important; }}
+.stMainBlock {{
+    padding-top: 1.5rem;
+}}
+
+/* Header — keep it clean, DO NOT hide the collapse/expand controls */
+header[data-testid="stHeader"] {{
+    background: transparent !important;
+    box-shadow: none !important;
+    border-bottom: 1px solid {DIVIDER};
+}}
+
+/* Only hide decorative chrome — never hide sidebar controls */
+#MainMenu, footer, .viewerBadge_container__r5tak {{
+    display: none !important;
+}}
+
+/* Ensure collapsed-sidebar expand button is ALWAYS visible and clickable */
+[data-testid="collapsedControl"] {{
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    z-index: 999999 !important;
+    background: {BG_SIDEBAR} !important;
+    border: 1px solid {BORDER} !important;
+    border-left: none !important;
+    border-radius: 0 8px 8px 0 !important;
+    padding: 0.5rem 0.3rem !important;
+    position: fixed !important;
+    left: 0 !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    box-shadow: 2px 0 8px rgba(30,27,24,0.08) !important;
+}}
+[data-testid="collapsedControl"] button {{
+    color: {TEXT_MAIN} !important;
+    font-size: 1.1rem !important;
+    font-weight: 600 !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 4px 6px !important;
+    cursor: pointer !important;
+}}
+[data-testid="collapsedControl"]:hover {{
+    background: {BG_CARD} !important;
+    box-shadow: 2px 0 12px rgba(30,27,24,0.12) !important;
+}}
+
+/* Also keep the sidebar collapse button (‹) visible when sidebar is open */
+[data-testid="stSidebar"] button[kind="header"] {{
+    color: {TEXT_SOFT} !important;
+    opacity: 1 !important;
+}}
+[data-testid="stSidebar"] button[kind="header"]:hover {{
+    color: {TEXT_MAIN} !important;
+    background: {BG_BASE} !important;
+}}
 
 /* ═══ Sidebar ═══ */
 [data-testid="stSidebar"] {{
     background: {BG_SIDEBAR};
-    background-image:
-        url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
     border-right: 1px solid {BORDER};
 }}
 
-[data-testid="stSidebar"] .stButton > button {{
-    background: transparent; color: {TEXT_SOFT}; border: none;
-    border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.85rem;
-    font-weight: 450; text-align: left; width: 100%;
-    transition: all 0.2s cubic-bezier(0.4,0,0.2,1); box-shadow: none;
-    display: flex; align-items: center; gap: 0.5rem;
-    font-family: '{FONT_BODY}', sans-serif;
-}}
-[data-testid="stSidebar"] .stButton > button:hover {{
-    background: {BG_BASE}; color: {TEXT_MAIN};
-    transform: translateX(3px);
-}}
-[data-testid="stSidebar"] .stButton > button[kind="primary"] {{
-    background: {BG_CARD}; color: {TEXT_MAIN}; font-weight: 550;
-    border-left: 3px solid {SAGE};
-    box-shadow: 0 1px 3px rgba(45,42,37,0.04);
-}}
-[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {{
-    background: {BG_CARD}; transform: none;
+/* Sidebar content spacing */
+[data-testid="stSidebar"] .stMarkdown {{
+    padding: 0 0.5rem;
 }}
 
-/* ═══ Editorial headings ═══ */
+/* Sidebar nav — radio-based for reliability */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
+    gap: 0.2rem;
+}}
+
+[data-testid="stSidebar"] .stRadio > div {{
+    gap: 0.15rem;
+}}
+
+[data-testid="stSidebar"] .stRadio label {{
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 450;
+    color: {TEXT_SOFT};
+    transition: all 0.15s;
+    cursor: pointer;
+}}
+
+[data-testid="stSidebar"] .stRadio label:hover {{
+    background: {BG_BASE};
+    color: {TEXT_MAIN};
+}}
+
+/* Active radio pill */
+[data-testid="stSidebar"] .stRadio [data-baseweb="radio"] + div {{
+    /* The checked state indicator is tricky with Streamlit's radio */
+}}
+
+/* Simpler: use the container styling */
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
+    background: {BG_CARD} !important;
+    color: {TEXT_MAIN} !important;
+    font-weight: 550 !important;
+    border: 1px solid {BORDER};
+    box-shadow: 0 1px 3px rgba(30,27,24,0.04);
+}}
+
+/* ═══ Typography ═══ */
 h1, h2, h3, h4 {{
     font-family: '{FONT_DISPLAY}', '{FONT_BODY}', serif !important;
     letter-spacing: 0 !important;
@@ -94,94 +146,99 @@ h1, h2, h3, h4 {{
 h1 {{ color: {TEXT_MAIN} !important; font-weight: 600 !important; font-size: 1.55rem !important; }}
 h2 {{ color: {TEXT_MAIN} !important; font-weight: 500 !important; font-size: 1.15rem !important; }}
 h3 {{ color: {TEXT_SOFT} !important; font-weight: 500 !important; font-size: 1rem !important; }}
-.stCaption {{ font-family: '{FONT_BODY}', sans-serif !important; color: {TEXT_MUTED} !important; font-size: 0.82rem !important; }}
 
-/* ═══ Metric cards — elevated for key intel ═══ */
+.stCaption {{
+    font-family: '{FONT_BODY}', sans-serif !important;
+    color: {TEXT_MUTED} !important;
+    font-size: 0.82rem !important;
+}}
+
+/* ═══ Metric cards ═══ */
 [data-testid="stMetric"] {{
-    background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 6px;
-    padding: 1.1rem 1.3rem;
-    box-shadow: 0 1px 2px rgba(45,42,37,0.03);
-    transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+    background: {BG_CARD};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    box-shadow: 0 1px 2px rgba(30,27,24,0.03);
+    transition: all 0.2s;
 }}
 [data-testid="stMetric"]:hover {{
-    box-shadow: 0 6px 20px rgba(45,42,37,0.06);
-    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(30,27,24,0.05);
     border-color: {GOLD};
 }}
 [data-testid="stMetric"] label {{
     color: {TEXT_MUTED} !important;
-    font-size: 0.72rem !important; font-weight: 500;
-    letter-spacing: 0.06em; text-transform: uppercase;
+    font-size: 0.7rem !important;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     font-family: '{FONT_BODY}', sans-serif !important;
 }}
 [data-testid="stMetricValue"] {{
     color: {TEXT_MAIN} !important;
-    font-size: 1.8rem !important; font-weight: 550 !important;
+    font-size: 1.75rem !important;
+    font-weight: 550 !important;
     font-family: '{FONT_MONO}', monospace !important;
-    letter-spacing: -0.02em;
 }}
-
-/* Critical metric — rose accent */
-.critical-metric [data-testid="stMetric"] {{ border-left: 3px solid {ROSE}; }}
-
-/* ═══ Asymmetric dossier card ═══ */
-.dossier-card {{
-    background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 8px;
-    padding: 1.2rem 1.4rem; position: relative; overflow: hidden;
-    box-shadow: 0 1px 3px rgba(45,42,37,0.03);
-    transition: box-shadow 0.25s;
-}}
-.dossier-card:hover {{ box-shadow: 0 6px 18px rgba(45,42,37,0.05); }}
-.dossier-card::before {{
-    content: ''; position: absolute; top: 0; left: 0;
-    width: 100%; height: 2px;
-    background: linear-gradient(90deg, {GOLD}, transparent);
-    opacity: 0; transition: opacity 0.3s;
-}}
-.dossier-card:hover::before {{ opacity: 1; }}
-
-/* ═══ Horizontal rule — gold accent ═══ */
-hr {{ border: none; border-top: 1px solid {DIVIDER}; margin: 1.2rem 0; }}
-.hr-accent {{ border: none; height: 1px; background: linear-gradient(90deg, {GOLD}, transparent); margin: 1rem 0; }}
 
 /* ═══ Tables ═══ */
 [data-testid="stDataFrame"] {{
-    border: 1px solid {BORDER}; border-radius: 6px; overflow: hidden;
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    overflow: hidden;
 }}
 [data-testid="stDataFrame"] th {{
-    background: {BG_SIDEBAR} !important; color: {TEXT_SOFT} !important;
-    font-weight: 500 !important; font-size: 0.78rem !important;
+    background: {BG_SIDEBAR} !important;
+    color: {TEXT_SOFT} !important;
+    font-weight: 500 !important;
+    font-size: 0.76rem !important;
     padding: 0.5rem 0.75rem !important;
     font-family: '{FONT_BODY}', sans-serif !important;
-    letter-spacing: 0.03em; text-transform: uppercase;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
 }}
 [data-testid="stDataFrame"] td {{
-    font-size: 0.83rem !important; padding: 0.4rem 0.75rem !important;
+    font-size: 0.83rem !important;
+    padding: 0.4rem 0.75rem !important;
     border-bottom: 1px solid {DIVIDER} !important;
     font-family: '{FONT_BODY}', sans-serif !important;
 }}
 [data-testid="stDataFrame"] tbody tr:hover td {{
     background: {BG_BASE} !important;
-    transition: background 0.15s;
 }}
 
 /* ═══ Buttons ═══ */
-div[data-testid="stVerticalBlock"] .stButton > button,
-div[data-testid="column"] .stButton > button {{
-    background: {INK}; color: {WHITE}; border: none; border-radius: 6px;
-    padding: 0.5rem 1.4rem; font-weight: 500; font-size: 0.85rem;
-    transition: all 0.2s;
+.stButton > button {{
+    background: {INK};
+    color: {WHITE};
+    border: none;
+    border-radius: 6px;
+    padding: 0.45rem 1.2rem;
+    font-weight: 500;
+    font-size: 0.85rem;
+    transition: all 0.15s;
     font-family: '{FONT_BODY}', sans-serif !important;
 }}
-div[data-testid="stVerticalBlock"] .stButton > button:hover {{
+.stButton > button:hover {{
     background: {SAGE_DARK};
-    box-shadow: 0 4px 14px rgba(95,118,91,0.3);
-    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(95,118,91,0.25);
+}}
+.stButton > button[kind="secondary"] {{
+    background: transparent;
+    color: {TEXT_SOFT};
+    border: 1px solid {BORDER};
+}}
+.stButton > button[kind="secondary"]:hover {{
+    background: {BG_CARD};
+    color: {TEXT_MAIN};
+    border-color: {GOLD};
+    box-shadow: none;
 }}
 
 /* ═══ Inputs ═══ */
 .stTextInput input, .stSelectbox > div > div {{
-    border-color: {BORDER} !important; border-radius: 6px !important;
+    border-color: {BORDER} !important;
+    border-radius: 6px !important;
     font-family: '{FONT_BODY}', sans-serif !important;
 }}
 .stTextInput input:focus {{
@@ -189,13 +246,40 @@ div[data-testid="stVerticalBlock"] .stButton > button:hover {{
     box-shadow: 0 0 0 1px {INK} !important;
 }}
 div[data-baseweb="popover"] {{
-    border-color: {BORDER} !important; border-radius: 6px !important;
+    border-color: {BORDER} !important;
+    border-radius: 6px !important;
 }}
 div[data-baseweb="popover"] [role="option"]:hover > div {{
     background: {BG_BASE} !important;
 }}
 div[data-baseweb="popover"] [aria-selected="true"] > div {{
     background: {BG_SIDEBAR} !important;
+}}
+
+/* ═══ Tabs ═══ */
+.stTabs [data-baseweb="tab-list"] {{
+    gap: 0;
+    border-bottom: 1px solid {DIVIDER};
+}}
+.stTabs [data-baseweb="tab"] {{
+    color: {TEXT_MUTED};
+    font-weight: 500;
+    font-size: 0.84rem;
+    padding: 0.45rem 1rem;
+    border-radius: 4px 4px 0 0;
+    font-family: '{FONT_BODY}', sans-serif !important;
+}}
+.stTabs [aria-selected="true"] {{
+    color: {TEXT_MAIN};
+    background: {BG_CARD};
+    border: 1px solid {DIVIDER};
+    border-bottom-color: {BG_CARD};
+}}
+
+/* ═══ Divider ═══ */
+hr {{
+    border-color: {DIVIDER} !important;
+    margin: 1rem 0 !important;
 }}
 
 /* ═══ Badges ═══ */
@@ -215,37 +299,18 @@ div[data-baseweb="popover"] [aria-selected="true"] > div {{
     display: inline-block; letter-spacing: 0.03em;
 }}
 
-/* ═══ Empty state ═══ */
-.empty-state {{
-    text-align: center; padding: 2.5rem 2rem;
-    background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 6px;
-    color: {TEXT_MUTED};
-}}
-.empty-state .icon {{ font-size: 2rem; margin-bottom: 0.8rem; opacity: 0.6; }}
-.empty-state .title {{
-    font-family: '{FONT_DISPLAY}', serif !important;
-    font-size: 0.95rem; font-weight: 500; color: {TEXT_SOFT}; margin-bottom: 0.3rem;
-}}
-.empty-state .desc {{
-    font-size: 0.82rem;
-}}
-
-/* ═══ Info / callout ═══ */
+/* ═══ Info callout ═══ */
 [data-testid="stInfo"] {{
-    background: {BG_CARD}; border-left: 2px solid {INK};
-    color: {TEXT_SOFT}; border-radius: 4px;
+    background: {BG_CARD};
+    border-left: 3px solid {INK};
+    color: {TEXT_SOFT};
+    border-radius: 4px;
 }}
 
-/* ═══ Tabs ═══ */
-.stTabs [data-baseweb="tab-list"] {{ gap: 0; border-bottom: 1px solid {DIVIDER}; }}
-.stTabs [data-baseweb="tab"] {{
-    color: {TEXT_MUTED}; font-weight: 500; font-size: 0.84rem;
-    padding: 0.45rem 1rem; border-radius: 4px 4px 0 0;
+/* ═══ Expander ═══ */
+.streamlit-expanderHeader {{
     font-family: '{FONT_BODY}', sans-serif !important;
-}}
-.stTabs [aria-selected="true"] {{
-    color: {TEXT_MAIN}; background: {BG_CARD};
-    border: 1px solid {DIVIDER}; border-bottom-color: {BG_CARD};
+    color: {TEXT_SOFT} !important;
 }}
 
 /* ═══ Scrollbar ═══ */
@@ -253,11 +318,48 @@ div[data-baseweb="popover"] [aria-selected="true"] > div {{
 ::-webkit-scrollbar-track {{ background: transparent; }}
 ::-webkit-scrollbar-thumb {{ background: {BORDER}; border-radius: 2px; }}
 
-/* ═══ Selectbox ═══ */
-[data-testid="stSelectbox"] {{ font-family: '{FONT_BODY}', sans-serif !important; }}
-
 /* ═══ Spinner ═══ */
-.stSpinner > div {{ border-color: {INK} transparent transparent transparent !important; }}
+.stSpinner > div {{
+    border-color: {INK} transparent transparent transparent !important;
+}}
+
+/* ═══ Dossier card utility class ═══ */
+.dossier-card {{
+    background: {BG_CARD};
+    border: 1px solid {BORDER};
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    box-shadow: 0 1px 3px rgba(30,27,24,0.03);
+    transition: box-shadow 0.2s;
+}}
+.dossier-card:hover {{
+    box-shadow: 0 4px 16px rgba(30,27,24,0.06);
+}}
+
+/* ═══ Empty state ═══ */
+.empty-state {{
+    text-align: center;
+    padding: 3rem 2rem;
+    background: {BG_CARD};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    color: {TEXT_MUTED};
+}}
+.empty-state .icon {{
+    font-size: 2rem;
+    margin-bottom: 0.8rem;
+    opacity: 0.5;
+}}
+.empty-state .title {{
+    font-family: '{FONT_DISPLAY}', serif !important;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: {TEXT_SOFT};
+    margin-bottom: 0.3rem;
+}}
+.empty-state .desc {{
+    font-size: 0.82rem;
+}}
 </style>
 """
 
@@ -270,12 +372,3 @@ def badge(p: str) -> str:
 
 def empty(icon: str, title: str, desc: str) -> str:
     return f'<div class="empty-state"><div class="icon">{icon}</div><div class="title">{title}</div><div class="desc">{desc}</div></div>'
-
-
-def dossier(title: str, body: str) -> str:
-    """A distinguished card with gold top-bar reveal on hover."""
-    return f'<div class="dossier-card"><div style="font-family:\'{FONT_DISPLAY}\',serif;font-size:0.9rem;font-weight:500;color:{TEXT_MAIN};margin-bottom:0.5rem">{title}</div><div style="font-size:0.82rem;color:{TEXT_SOFT}">{body}</div></div>'
-
-
-def hr_accent() -> str:
-    return f'<div class="hr-accent"></div>'
