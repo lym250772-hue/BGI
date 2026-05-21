@@ -6,6 +6,32 @@ import pandas as pd
 import ui.theme as T
 
 
+def _check_db():
+    """Check which backend services are reachable."""
+    status = {"MySQL": False, "Neo4j": False, "Milvus": False}
+    try:
+        from storage.mysql_store import mysql
+        with mysql.cursor() as c:
+            c.execute("SELECT 1")
+        status["MySQL"] = True
+    except Exception:
+        pass
+    try:
+        from storage.neo4j_store import neo4j
+        with neo4j.driver.session() as s:
+            s.run("RETURN 1")
+        status["Neo4j"] = True
+    except Exception:
+        pass
+    try:
+        from storage.milvus_store import milvus
+        milvus.client.get_collection_stats("slang_embeddings")
+        status["Milvus"] = True
+    except Exception:
+        pass
+    return status
+
+
 def _fetch():
     try:
         from storage.mysql_store import mysql
@@ -19,6 +45,7 @@ def show():
     st.caption("黑灰产情报采集与分析实时概览")
 
     s = _fetch()
+    svc = _check_db()
 
     # ---- KPI row ----
     k1, k2, k3, k4 = st.columns(4)
@@ -64,20 +91,31 @@ def show():
                     unsafe_allow_html=True,
                 )
         else:
-            st.markdown(T.empty("📋", "暂无情报", "运行采集器后在此展示最新情报"), unsafe_allow_html=True)
+            st.markdown(T.empty("📋", "暂无情报", "运行 python main.py collect 采集数据"), unsafe_allow_html=True)
 
     st.divider()
 
     # ---- System status ----
     st.markdown("#### 系统状态")
     c1, c2, c3 = st.columns(3)
-    for col, name, host in [(c1, "MySQL", "localhost:3306"), (c2, "Neo4j", "localhost:7687"), (c3, "Milvus", "localhost:19530")]:
+
+    svc_info = [
+        ("MySQL", "localhost:3306", "业务数据存储"),
+        ("Neo4j", "localhost:7687", "知识图谱引擎"),
+        ("Milvus", "localhost:19530", "向量检索引擎"),
+    ]
+    for col, (name, host, desc) in zip([c1, c2, c3], svc_info):
+        up = svc.get(name, False)
+        color = T.SAGE if up else T.ROSE
+        status_text = "运行中" if up else "未连接"
         with col:
             st.markdown(
                 f"""<div style="background:{T.BG_CARD};border:1px solid {T.BORDER};border-radius:8px;
-                padding:0.8rem 1rem;display:flex;align-items:center;gap:0.7rem">
-                <div style="width:8px;height:8px;border-radius:50%;background:{T.SAGE}"></div>
-                <div><div style="font-weight:500;color:{T.TEXT_MAIN};font-size:0.88rem">{name}</div>
-                <div style="font-size:0.7rem;color:{T.TEXT_MUTED}">运行中 · {host}</div></div></div>""",
+                padding:0.8rem 1rem;">
+                <div style="display:flex;align-items:center;gap:0.7rem;margin-bottom:0.25rem">
+                <div style="width:8px;height:8px;border-radius:50%;background:{color}"></div>
+                <div style="font-weight:500;color:{T.TEXT_MAIN};font-size:0.88rem">{name}</div>
+                <span style="font-size:0.68rem;color:{color};font-weight:500">{status_text}</span></div>
+                <div style="font-size:0.7rem;color:{T.TEXT_MUTED}">{desc} · {host}</div></div>""",
                 unsafe_allow_html=True,
             )

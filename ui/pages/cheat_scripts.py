@@ -1,8 +1,16 @@
 """Cheat script generation — LLM-powered abuse chain analysis."""
 
 import streamlit as st
+import json
 
 import ui.theme as T
+
+EXAMPLES = [
+    "抖音无人直播刷量",
+    "刷单返利诈骗",
+    "微信账号买卖",
+    "薅羊毛众包",
+]
 
 
 def _generate(kw: str) -> dict | None:
@@ -25,7 +33,6 @@ def _generate(kw: str) -> dict | None:
 
     try:
         from openai import OpenAI
-        import json
         client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_api_base)
         resp = client.chat.completions.create(
             model=settings.llm_model, messages=[{"role": "user", "content": prompt}],
@@ -36,48 +43,23 @@ def _generate(kw: str) -> dict | None:
         return {"error": str(exc)}
 
 
-def show():
-    st.markdown("## 作弊剧本生成")
-    st.caption("基于 LLM 自动生成黑灰产滥用链路与对抗方案")
-
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        kw = st.text_input("关键词", placeholder="如：抖音直播刷量、刷单套利、账号买卖...", label_visibility="collapsed")
-    with c2:
-        go = st.button("生成剧本", type="primary", use_container_width=True)
-
-    st.divider()
-
-    if not go:
-        st.markdown("#### 示例")
-        for ex in ["抖音无人直播刷量", "刷单返利诈骗", "微信账号买卖", "薅羊毛众包"]:
-            st.button(ex, key=f"ex_{ex}", use_container_width=False)
-        st.divider()
-        st.markdown(T.empty("📝", "输入关键词生成作弊剧本", "LLM 自动分析黑灰产链路并生成对抗方案"), unsafe_allow_html=True)
-        return
-
-    if not kw:
-        st.warning("请输入关键词")
-        return
-
-    with st.spinner(f"分析「{kw}」中..."):
-        result = _generate(kw)
-
-    if result is None:
-        st.error("LLM API Key 未配置，请在 .env 中设置 BGI_LLM_API_KEY")
-        return
-    if "error" in result:
-        st.error(f"生成失败: {result['error']}")
-        return
-
-    st.markdown(f"### {result.get('title', kw)}")
+def _render_result(result: dict):
+    st.markdown(f"### {result.get('title', '')}")
 
     risk = result.get("risk_type", "")
-    st.markdown(f'<span style="background:{T.ROSE};color:white;padding:4px 14px;border-radius:20px;font-size:0.85rem;font-weight:500">{risk}</span>', unsafe_allow_html=True)
+    risk_colors = {
+        "诈骗": T.ROSE, "引流": T.GOLD, "作弊": T.SLATE,
+        "账号黑产": T.ROSE_DARK, "内容违规": T.SAGE_DARK,
+        "工具交易": "#9A8A7A", "直播违规": "#8A7A8A",
+    }
+    bg = risk_colors.get(risk, T.SLATE)
+    st.markdown(
+        f'<span style="background:{bg};color:white;padding:4px 14px;border-radius:20px;font-size:0.85rem;font-weight:500">{risk}</span>',
+        unsafe_allow_html=True,
+    )
 
     st.divider()
 
-    # Abuse chain
     st.markdown("#### 滥用链路")
     chain = result.get("abuse_chain", "")
     steps = [s.strip() for s in chain.split("\n") if s.strip()] or [chain]
@@ -93,7 +75,6 @@ def show():
             unsafe_allow_html=True,
         )
 
-    # Tools
     tools = result.get("tools_used", [])
     if tools:
         st.markdown("#### 涉及工具")
@@ -102,7 +83,6 @@ def show():
             for t in tools
         ), unsafe_allow_html=True)
 
-    # Defense
     st.markdown("#### 对抗建议")
     for sug in result.get("defense_suggestions", []):
         st.markdown(
@@ -111,3 +91,50 @@ def show():
             color:{T.TEXT_MAIN};font-size:0.88rem">🛡 {sug}</div>""",
             unsafe_allow_html=True,
         )
+
+
+def show():
+    st.markdown("## 作弊剧本生成")
+    st.caption("基于 LLM 自动生成黑灰产滥用链路与对抗方案")
+
+    # Example chips — clicking sets the keyword in session state
+    st.markdown("#### 示例场景")
+    ex_cols = st.columns(len(EXAMPLES))
+    for i, ex in enumerate(EXAMPLES):
+        with ex_cols[i]:
+            if st.button(ex, key=f"ex_{ex}", use_container_width=True):
+                st.session_state.cheat_kw = ex
+                st.rerun()
+
+    st.divider()
+
+    # Input row
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        kw = st.text_input(
+            "关键词",
+            value=st.session_state.get("cheat_kw", ""),
+            placeholder="如：抖音直播刷量、刷单套利、账号买卖...",
+            label_visibility="collapsed",
+            key="cheat_kw",
+        )
+    with c2:
+        go = st.button("生成剧本", type="primary", use_container_width=True, key="cheat_go")
+
+    # Handle generate
+    if go and kw:
+        with st.spinner(f"分析「{kw}」中..."):
+            result = _generate(kw)
+        if result is None:
+            st.error("LLM API Key 未配置，请在 .env 中设置 BGI_LLM_API_KEY")
+        elif "error" in result:
+            st.error(f"生成失败: {result['error']}")
+        else:
+            st.divider()
+            _render_result(result)
+
+    elif go and not kw:
+        st.warning("请输入关键词")
+
+    elif not go and not kw:
+        st.markdown(T.empty("📝", "点击示例或输入关键词", "LLM 自动分析黑灰产链路并生成对抗方案"), unsafe_allow_html=True)

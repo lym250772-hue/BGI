@@ -66,7 +66,6 @@ with st.sidebar:
 
 page = st.session_state.get("nav_page", "dashboard")
 
-# ---- Router ----
 ROUTES = {
     "dashboard":     dashboard.show,
     "intel_list":    intel_list.show,
@@ -75,4 +74,14 @@ ROUTES = {
     "cheat_scripts": cheat_scripts.show,
     "slang_dict":    slang_dict.show,
 }
-ROUTES.get(page, dashboard.show)()
+
+try:
+    ROUTES.get(page, dashboard.show)()
+except Exception as exc:
+    st.markdown(
+        f"""<div class="empty-state">
+        <div class="icon">⚠️</div>
+        <div class="title">页面加载失败</div>
+        <div class="desc">{exc}</div></div>""",
+        unsafe_allow_html=True,
+    )
