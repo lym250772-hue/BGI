@@ -1,138 +1,108 @@
-"""Knowledge graph page — interactive entity graph visualization with pyvis."""
+"""Knowledge graph — Neo4j + pyvis visualization."""
 
 import streamlit as st
 import tempfile
 from pathlib import Path
 
-from ui.theme import empty_state
+import ui.theme as T
 
 
-def _neo4j():
-    from storage.neo4j_store import neo4j as n
-    return n
-
-
-def _build_graph(entity_value: str = ""):
-    """Fetch graph data from Neo4j and build a pyvis network."""
+def _fetch_graph(search: str = ""):
     try:
-        neo4j = _neo4j()
-        if entity_value:
-            neighborhood = neo4j.find_entity_neighborhood(entity_value)
-        else:
-            # Get overview — sample some intel nodes and their entities
-            neighborhood = {"nodes": [], "edges": []}
-            with neo4j.driver.session() as session:
-                result = session.run("""
+        from storage.neo4j_store import neo4j
+        nodes, edges = [], []
+        seen = set()
+
+        with neo4j.driver.session() as sess:
+            if search:
+                # Search by entity value
+                result = sess.run("""
+                    MATCH (e:Entity)-[:EXTRACTED_FROM]-(i:Intel)
+                    WHERE e.value CONTAINS $q
+                    RETURN e, i
+                    LIMIT 40
+                """, q=search)
+            else:
+                result = sess.run("""
                     MATCH (i:Intel)-[:EXTRACTED_FROM]-(e:Entity)
                     RETURN i.raw_id as intel_id, i.text as text,
-                           e.type as entity_type, e.value as entity_value,
-                           e.uuid as entity_uuid
+                           e.type as etype, e.value as evalue,
+                           e.uuid as eid
                     LIMIT 50
                 """)
-                seen_nodes = set()
-                for record in result:
-                    iid = str(record["intel_id"])
-                    eid = record["entity_uuid"]
-                    if iid not in seen_nodes:
-                        neighborhood["nodes"].append({
-                            "id": iid,
-                            "label": (record["text"] or "")[:30],
-                            "group": "intel",
-                        })
-                        seen_nodes.add(iid)
-                    if eid not in seen_nodes:
-                        neighborhood["nodes"].append({
-                            "id": eid,
-                            "label": f"{record['entity_type']}:{record['entity_value']}",
-                            "group": record["entity_type"],
-                        })
-                        seen_nodes.add(eid)
-                    neighborhood["edges"].append({"from": iid, "to": eid})
-        return neighborhood
-    except Exception as exc:
-        return None
+
+            for r in result:
+                if search:
+                    eid = r["e"]["uuid"]
+                    iid = str(r["i"]["raw_id"])
+                    if eid not in seen:
+                        nodes.append({"id": eid, "label": f"{r['e']['type']}:{r['e']['value']}", "group": r["e"]["type"]})
+                        seen.add(eid)
+                    if iid not in seen:
+                        nodes.append({"id": iid, "label": (r["i"]["text"] or "")[:25], "group": "intel"})
+                        seen.add(iid)
+                    edges.append({"from": iid, "to": eid})
+                else:
+                    iid = str(r["intel_id"])
+                    eid = r["eid"]
+                    if iid not in seen:
+                        nodes.append({"id": iid, "label": (r["text"] or "")[:25], "group": "intel"})
+                        seen.add(iid)
+                    if eid not in seen:
+                        nodes.append({"id": eid, "label": f"{r['etype']}:{r['evalue']}", "group": r["etype"]})
+                        seen.add(eid)
+                    edges.append({"from": iid, "to": eid})
+
+        return nodes, edges
+    except Exception:
+        return None, None
 
 
 def show():
     st.markdown("## 知识图谱")
-    st.caption("基于 Neo4j 的实体关系可视化")
+    st.caption("基于 Neo4j 的实体关系可视分析")
 
-    # Search bar
-    search = st.text_input(
-        "搜索实体",
-        placeholder="输入 entity_type:value 查询关联图谱…",
-        label_visibility="collapsed",
-    )
-
+    search = st.text_input("搜索实体", placeholder="输入 entity_type:value 查询关联图谱...", label_visibility="collapsed")
     st.divider()
 
-    graph_data = _build_graph(search if search else "")
+    nodes, edges = _fetch_graph(search if search else "")
 
-    if graph_data is None:
-        st.markdown(
-            empty_state("⚠️", "Neo4j 未连接", "请确认 Neo4j 服务已启动 · bolt://localhost:7687"),
-            unsafe_allow_html=True,
-        )
+    if nodes is None:
+        st.markdown(T.empty("⚠️", "Neo4j 未连接", "确认 Neo4j 已启动：bolt://localhost:7687"), unsafe_allow_html=True)
         return
 
-    if not graph_data["nodes"]:
-        st.markdown(
-            empty_state("🕸️", "图谱暂无数据", "分析情报后实体关系将自动同步至 Neo4j"),
-            unsafe_allow_html=True,
-        )
+    if not nodes:
+        st.markdown(T.empty("🕸", "图谱暂无数据", "分析情报后实体关系将自动同步"), unsafe_allow_html=True)
         return
 
-    # Build pyvis graph
     try:
         from pyvis.network import Network
+        net = Network(height="530px", width="100%", bgcolor=T.BG_CARD, font_color=T.TEXT_MAIN)
+        net.repulsion(node_distance=180, spring_length=180)
 
-        net = Network(height="550px", width="100%", bgcolor="#FDFBF9", font_color="#3D3929")
-        net.repulsion(node_distance=200, spring_length=200)
-
-        # Color map for entity types
-        color_map = {
-            "intel": "#8B9D83",
-            "phone": "#7E8FA6",
-            "wechat": "#C4A8A3",
-            "qq": "#A3B0C4",
-            "url": "#B5A0B5",
-            "domain": "#9BAFA5",
-            "ip": "#B8A596",
-            "bank_card": "#A8B5A0",
-            "alipay": "#B0A8B5",
-            "slang": "#A5B0A8",
-            "tool": "#B5A8A0",
-            "feature": "#A0A8B5",
+        colors = {
+            "intel": T.SAGE, "phone": T.SLATE, "wechat": T.ROSE, "qq": "#A0ACBA",
+            "url": "#B0A0B0", "domain": "#9AAFA0", "ip": "#B0A898",
+            "bank_card": "#A5B0A0", "alipay": "#ACA8B0", "slang": "#A0AAB0",
+            "tool": "#B0A8A0", "feature": "#9EA8B0",
         }
 
-        for node in graph_data["nodes"]:
-            group = node.get("group", "intel")
-            net.add_node(
-                node["id"],
-                label=node["label"],
-                color=color_map.get(group, "#8B9D83"),
-                shape="dot" if group == "intel" else "box",
-                title=node["label"],
-            )
+        for n in nodes:
+            g = n.get("group", "intel")
+            net.add_node(n["id"], label=n["label"], color=colors.get(g, T.SAGE),
+                         shape="dot" if g == "intel" else "box", title=n["label"])
+        for e in edges:
+            net.add_edge(e["from"], e["to"], color=T.BORDER, width=1.2)
 
-        for edge in graph_data["edges"]:
-            net.add_edge(edge["from"], edge["to"], color="#D8D3CB", width=1.5)
-
-        # Save to temp file and render
         with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
             net.save_graph(tmp.name)
-            html = Path(tmp.name).read_text(encoding="utf-8")
+            html_str = Path(tmp.name).read_text(encoding="utf-8")
             Path(tmp.name).unlink()
 
-        st.components.v1.html(html, height=580, scrolling=True)
-
-        # Legend
-        st.caption("图例：● 情报节点 | □ 实体节点 | — 提取关系")
+        st.components.v1.html(html_str, height=550, scrolling=True)
+        st.caption("● 情报  |  □ 实体  |  — EXTRACTED_FROM")
 
     except ImportError:
-        st.markdown(
-            empty_state("📦", "pyvis 未安装", "运行 pip install pyvis 启用图谱可视化"),
-            unsafe_allow_html=True,
-        )
+        st.markdown(T.empty("📦", "pyvis 未安装", "pip install pyvis"), unsafe_allow_html=True)
     except Exception as exc:
-        st.error(f"图谱渲染失败: {exc}")
+        st.error(f"渲染失败: {exc}")

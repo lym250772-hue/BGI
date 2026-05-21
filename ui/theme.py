@@ -1,307 +1,162 @@
-"""Morandi color scheme and CSS theme for the BGI dashboard."""
+"""Morandi color system and CSS for the BGI dashboard."""
 
-MORANDI = {
-    "bg_primary": "#F5F1EC",
-    "bg_card": "#FDFBF9",
-    "bg_sidebar": "#EBE6DE",
-    "text_primary": "#3D3929",
-    "text_secondary": "#6B6760",
-    "text_muted": "#8E8A83",
-    "accent_sage": "#8B9D83",
-    "accent_blue": "#7E8FA6",
-    "accent_rose": "#C4A8A3",
-    "border": "#D8D3CB",
-    "divider": "#E5E0D9",
-    "white": "#FFFFFF",
-    "highlight_high": "#C4A8A3",
-    "highlight_critical": "#B87A6E",
-    "highlight_normal": "#8B9D83",
-}
+# ---------------------------------------------------------------------------
+# Palette
+# ---------------------------------------------------------------------------
+WHITE      = "#FFFFFF"
+BG_BASE    = "#F5F2ED"
+BG_CARD    = "#FAF9F6"
+BG_SIDEBAR = "#ECE8E1"
+TEXT_MAIN  = "#3C3A35"
+TEXT_SOFT  = "#6E6B64"
+TEXT_MUTED = "#928F88"
+SAGE       = "#8B9D83"
+SAGE_DARK  = "#6E8266"
+SLATE      = "#7D8E9E"
+ROSE       = "#C2A6A3"
+ROSE_DARK  = "#A88480"
+BORDER     = "#D6D1C9"
+DIVIDER    = "#E3DFD8"
 
-CSS = """
+CSS = f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@350;450;550;650&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    color: #3D3929;
-}
+* {{ font-family: 'Inter', sans-serif; }}
 
-/* ---- Remove white header bar ---- */
-header[data-testid="stHeader"] {
-    background: #F5F1EC !important;
-    box-shadow: none !important;
-    border-bottom: 1px solid #E5E0D9;
-}
-[data-testid="stToolbar"] { display: none; }
-#MainMenu { visibility: hidden; }
-footer { visibility: hidden; }
-.viewerBadge_container__r5tak { display: none; }
-
-/* ---- Main background ---- */
-.stApp { background-color: #F5F1EC; }
+/* ---- Shell ---- */
+.stApp {{ background: {BG_BASE}; }}
+header[data-testid="stHeader"] {{ background: {BG_BASE} !important; box-shadow: none; border-bottom: 1px solid {DIVIDER}; }}
+[data-testid="stToolbar"], #MainMenu, footer, .viewerBadge_container__r5tak {{ display: none !important; }}
 
 /* ---- Sidebar ---- */
-[data-testid="stSidebar"] {
-    background-color: #EBE6DE;
-    border-right: 1px solid #D8D3CB;
-}
-
-/* ---- Sidebar nav buttons — styled as clean nav items ---- */
-[data-testid="stSidebar"] .stButton {
-    margin-bottom: 2px;
-}
-[data-testid="stSidebar"] .stButton > button {
-    background: transparent !important;
-    color: #6B6760 !important;
-    border: 1px solid transparent !important;
-    border-radius: 8px !important;
-    padding: 0.65rem 0.9rem !important;
-    font-size: 0.88rem !important;
-    font-weight: 450 !important;
-    text-align: left !important;
-    display: flex !important;
-    align-items: center !important;
-    gap: 0.6rem !important;
-    width: 100% !important;
-    transition: all 0.18s ease !important;
-    box-shadow: none !important;
-}
-[data-testid="stSidebar"] .stButton > button:hover {
-    background: #F5F1EC !important;
-    color: #3D3929 !important;
-    border-color: #D8D3CB !important;
-}
-/* Active nav button */
-[data-testid="stSidebar"] .stButton > button[kind="primary"] {
-    background: #FDFBF9 !important;
-    color: #3D3929 !important;
-    font-weight: 550 !important;
-    border-color: #D8D3CB !important;
-    box-shadow: 0 1px 4px rgba(61, 57, 41, 0.06) !important;
-}
-[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
-    background: #FDFBF9 !important;
-}
-
-/* ---- Sidebar brand area ---- */
-.sidebar-brand {
-    padding: 0.4rem 0 0.8rem 0;
+[data-testid="stSidebar"] {{
+    background: {BG_SIDEBAR};
+    border-right: 1px solid {BORDER};
+}}
+[data-testid="stSidebar"] .stButton > button {{
+    background: transparent;
+    color: {TEXT_SOFT};
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0.55rem 0.8rem;
+    font-size: 0.88rem;
+    font-weight: 450;
+    text-align: left;
+    width: 100%;
+    transition: all 0.15s;
+    box-shadow: none;
     display: flex;
     align-items: center;
-    gap: 10px;
-}
-.sidebar-brand .brand-icon {
-    width: 34px; height: 34px;
-    background: #8B9D83; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    color: white; font-weight: 700; font-size: 1rem;
-}
+    gap: 0.5rem;
+}}
+[data-testid="stSidebar"] .stButton > button:hover {{
+    background: {BG_BASE};
+    color: {TEXT_MAIN};
+    border-color: {BORDER};
+}}
+[data-testid="stSidebar"] .stButton > button[kind="primary"] {{
+    background: {BG_CARD};
+    color: {TEXT_MAIN};
+    font-weight: 550;
+    border-color: {BORDER};
+    box-shadow: 0 1px 3px rgba(60,58,53,0.05);
+}}
+[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {{
+    background: {BG_CARD};
+}}
 
-/* ---- Sidebar footer (version + time, bottom-left) ---- */
-.sidebar-footer {
-    margin-top: 1.5rem;
-    padding: 0.8rem 0.2rem;
-    border-top: 1px solid #D8D3CB;
-    font-size: 0.72rem;
-    color: #8E8A83;
-}
-
-/* ---- Cards (metric containers) ---- */
-[data-testid="stMetric"] {
-    background: #FDFBF9;
-    border: 1px solid #D8D3CB;
+/* ---- Metric cards ---- */
+[data-testid="stMetric"] {{
+    background: {BG_CARD};
+    border: 1px solid {BORDER};
     border-radius: 10px;
-    padding: 1.2rem 1.5rem;
-    box-shadow: 0 2px 8px rgba(61, 57, 41, 0.04);
-    transition: box-shadow 0.2s;
-}
-[data-testid="stMetric"]:hover {
-    box-shadow: 0 4px 16px rgba(61, 57, 41, 0.08);
-}
-[data-testid="stMetric"] label {
-    color: #8E8A83 !important;
-    font-size: 0.8rem !important;
-    font-weight: 500 !important;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-[data-testid="stMetricValue"] {
-    color: #3D3929 !important;
-    font-size: 1.8rem !important;
+    padding: 1.1rem 1.4rem;
+    box-shadow: 0 1px 4px rgba(60,58,53,0.03);
+}}
+[data-testid="stMetric"] label {{
+    color: {TEXT_MUTED} !important;
+    font-size: 0.78rem !important;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+}}
+[data-testid="stMetricValue"] {{
+    color: {TEXT_MAIN} !important;
+    font-size: 1.75rem !important;
     font-weight: 600 !important;
-}
+}}
 
-/* ---- DataFrames ---- */
-[data-testid="stDataFrame"] {
-    border: 1px solid #D8D3CB;
-    border-radius: 8px;
-    overflow: hidden;
-}
-[data-testid="stDataFrame"] th {
-    background-color: #EBE6DE !important;
-    color: #6B6760 !important;
+/* ---- Tables ---- */
+[data-testid="stDataFrame"] {{ border: 1px solid {BORDER}; border-radius: 8px; overflow: hidden; }}
+[data-testid="stDataFrame"] th {{
+    background: {BG_SIDEBAR} !important;
+    color: {TEXT_SOFT} !important;
     font-weight: 500 !important;
-    font-size: 0.82rem !important;
-    padding: 0.6rem 0.8rem !important;
-}
-[data-testid="stDataFrame"] td {
-    font-size: 0.85rem !important;
+    font-size: 0.8rem !important;
     padding: 0.5rem 0.8rem !important;
-    border-bottom: 1px solid #E5E0D9 !important;
-}
+}}
+[data-testid="stDataFrame"] td {{
+    font-size: 0.84rem !important;
+    padding: 0.45rem 0.8rem !important;
+    border-bottom: 1px solid {DIVIDER} !important;
+}}
 
-/* ---- General buttons ---- */
-div[data-testid="column"] .stButton > button,
-div[data-testid="stVerticalBlock"] .stButton > button {
-    background-color: #8B9D83 !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 8px !important;
-    padding: 0.5rem 1.5rem !important;
-    font-weight: 500 !important;
-}
-div[data-testid="column"] .stButton > button:hover {
-    background-color: #7A8C72 !important;
-    box-shadow: 0 2px 8px rgba(139, 157, 131, 0.3);
-}
+/* ---- Buttons (main area only) ---- */
+div[data-testid="stVerticalBlock"] .stButton > button,
+div[data-testid="column"] .stButton > button {{
+    background: {SAGE};
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 1.5rem;
+    font-weight: 500;
+    transition: all 0.15s;
+}}
+div[data-testid="stVerticalBlock"] .stButton > button:hover {{
+    background: {SAGE_DARK};
+    box-shadow: 0 2px 8px rgba(139,157,131,0.25);
+}}
 
 /* ---- Inputs ---- */
-.stTextInput input {
-    border-color: #D8D3CB !important;
-    border-radius: 8px !important;
-}
-.stTextInput input:focus {
-    border-color: #8B9D83 !important;
-    box-shadow: 0 0 0 2px rgba(139, 157, 131, 0.2) !important;
-}
+.stTextInput input {{ border-color: {BORDER}; border-radius: 8px; }}
+.stTextInput input:focus {{ border-color: {SAGE} !important; box-shadow: 0 0 0 2px rgba(139,157,131,0.15); }}
+[data-testid="stSelectbox"] > div > div {{ border-color: {BORDER} !important; border-radius: 8px !important; }}
 
-/* ---- Tabs ---- */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 0;
-    border-bottom: 2px solid #E5E0D9;
-}
-.stTabs [data-baseweb="tab"] {
-    color: #8E8A83;
-    font-weight: 500;
-    padding: 0.5rem 1.2rem;
-    border-radius: 8px 8px 0 0;
-}
-.stTabs [aria-selected="true"] {
-    color: #6B6760;
-    background-color: #FDFBF9;
-    border: 1px solid #E5E0D9;
-    border-bottom-color: #FDFBF9;
-}
+/* ---- Typography ---- */
+h1 {{ color: {TEXT_MAIN} !important; font-weight: 600 !important; font-size: 1.5rem !important; }}
+h2 {{ color: {TEXT_SOFT} !important; font-weight: 500 !important; font-size: 1.1rem !important; }}
+h3 {{ color: {TEXT_SOFT} !important; font-weight: 500 !important; font-size: 1rem !important; }}
 
-/* ---- Headers ---- */
-h1 { color: #3D3929 !important; font-weight: 600 !important; font-size: 1.6rem !important; letter-spacing: -0.02em; }
-h2 { color: #6B6760 !important; font-weight: 500 !important; font-size: 1.15rem !important; }
-h3 { color: #6B6760 !important; font-weight: 500 !important; font-size: 1rem !important; }
-
-/* ---- Info boxes ---- */
-[data-testid="stInfo"] {
-    background-color: #FDFBF9;
-    border-left: 3px solid #7E8FA6;
-    color: #6B6760;
-    border-radius: 4px;
-}
-
-hr { border-color: #E5E0D9 !important; }
+/* ---- Misc ---- */
+hr {{ border-color: {DIVIDER} !important; }}
+[data-testid="stInfo"] {{ background: {BG_CARD}; border-left: 3px solid {SLATE}; color: {TEXT_SOFT}; border-radius: 4px; }}
 
 /* ---- Priority badges ---- */
-.priority-high     { background: #C4A8A3; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 500; }
-.priority-critical { background: #B87A6E; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 500; }
-.priority-normal   { background: #8B9D83; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 500; }
+.badge-high     {{ background: {ROSE}; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.74rem; font-weight: 500; display: inline-block; }}
+.badge-critical {{ background: {ROSE_DARK}; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.74rem; font-weight: 500; display: inline-block; }}
+.badge-normal   {{ background: {SAGE}; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.74rem; font-weight: 500; display: inline-block; }}
 
 /* ---- Empty state ---- */
-.empty-state {
-    text-align: center;
-    padding: 3rem 2rem;
-    background: #FDFBF9;
-    border: 1px dashed #D8D3CB;
-    border-radius: 12px;
-    color: #8E8A83;
-}
-.empty-state .icon { font-size: 2.5rem; margin-bottom: 1rem; }
-.empty-state .title { font-size: 1.05rem; font-weight: 500; color: #6B6760; margin-bottom: 0.5rem; }
+.empty-state {{
+    text-align: center; padding: 3rem 2rem;
+    background: {BG_CARD}; border: 1px dashed {BORDER}; border-radius: 12px; color: {TEXT_MUTED};
+}}
+.empty-state .icon {{ font-size: 2.5rem; margin-bottom: 0.8rem; }}
+.empty-state .title {{ font-size: 1rem; font-weight: 500; color: {TEXT_SOFT}; margin-bottom: 0.4rem; }}
 
 /* ---- Scrollbar ---- */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #F5F1EC; }
-::-webkit-scrollbar-thumb { background: #D8D3CB; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #B8B3AB; }
+::-webkit-scrollbar {{ width: 5px; }}
+::-webkit-scrollbar-track {{ background: {BG_BASE}; }}
+::-webkit-scrollbar-thumb {{ background: {BORDER}; border-radius: 3px; }}
 </style>
 """
 
-NAV_ITEMS = [
-    {"id": "dashboard",    "icon": u"\U0001F4CA", "label": "仪表盘"},
-    {"id": "intel_list",   "icon": u"\U0001F4CB", "label": "情报列表"},
-    {"id": "entities",     "icon": u"\U0001F517", "label": "实体库"},
-    {"id": "graph",        "icon": u"\U0001F578", "label": "知识图谱"},
-    {"id": "cheat_scripts","icon": u"\U0001F4DD", "label": "作弊剧本"},
-    {"id": "slang_dict",   "icon": u"\U0001F4D6", "label": "黑话词典"},
-]
+
+def badge(p: str) -> str:
+    if p == "critical": return '<span class="badge-critical">CRITICAL</span>'
+    if p == "high":     return '<span class="badge-high">HIGH</span>'
+    return '<span class="badge-normal">NORMAL</span>'
 
 
-def inject_theme():
-    import streamlit as st
-    st.markdown(CSS, unsafe_allow_html=True)
-
-
-def render_sidebar():
-    """Render Morandi sidebar with styled button navigation. No JS hacks."""
-    import streamlit as st
-    from datetime import datetime
-
-    # Brand logo
-    st.sidebar.markdown(
-        """<div class="sidebar-brand">
-        <div class="brand-icon">B</div>
-        <div>
-        <div style="font-weight:600;color:#3D3929;font-size:1rem;line-height:1.2">BGI</div>
-        <div style="font-size:0.68rem;color:#8E8A83;line-height:1.2">Intel Analysis</div>
-        </div></div>""",
-        unsafe_allow_html=True,
-    )
-
-    st.sidebar.markdown('<div style="height:0.6rem"></div>', unsafe_allow_html=True)
-
-    # Nav buttons — native Streamlit, no JS
-    active = st.session_state.get("nav_page", "dashboard")
-    for item in NAV_ITEMS:
-        is_active = active == item["id"]
-        btn_type = "primary" if is_active else "secondary"
-        if st.sidebar.button(
-            f"  {item['icon']}  {item['label']}",
-            key=f"navbtn_{item['id']}",
-            type=btn_type,
-            use_container_width=True,
-        ):
-            st.session_state.nav_page = item["id"]
-            st.rerun()
-
-    # Version footer
-    st.sidebar.markdown(
-        f"""<div class="sidebar-footer">
-        BGI v0.2 · {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>""",
-        unsafe_allow_html=True,
-    )
-
-    return active
-
-
-def priority_badge(priority: str) -> str:
-    if priority == "critical":
-        return '<span class="priority-critical">CRITICAL</span>'
-    if priority == "high":
-        return '<span class="priority-high">HIGH</span>'
-    return '<span class="priority-normal">NORMAL</span>'
-
-
-def empty_state(icon: str, title: str, description: str) -> str:
-    return f"""<div class="empty-state">
-        <div class="icon">{icon}</div>
-        <div class="title">{title}</div>
-        <div>{description}</div>
-    </div>"""
+def empty(icon: str, title: str, desc: str) -> str:
+    return f'<div class="empty-state"><div class="icon">{icon}</div><div class="title">{title}</div><div>{desc}</div></div>'
