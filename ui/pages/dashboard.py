@@ -1,4 +1,4 @@
-"""Dashboard — KPI cards, risk distribution, recent activity, system status."""
+"""Dashboard — asymmetric editorial layout: dossier-style KPIs, risk chart, recent intel."""
 
 import streamlit as st
 import pandas as pd
@@ -7,7 +7,6 @@ import ui.theme as T
 
 
 def _check_db():
-    """Check which backend services are reachable."""
     status = {"MySQL": False, "Neo4j": False, "Milvus": False}
     try:
         from storage.mysql_store import mysql
@@ -41,27 +40,33 @@ def _fetch():
 
 
 def show():
-    st.markdown("## 情报仪表盘")
-    st.caption("黑灰产情报采集与分析实时概览")
-
     s = _fetch()
     svc = _check_db()
 
-    # ---- KPI row ----
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
+    # ── Header with dossier-style date line ──
+    st.markdown("## 情报仪表盘")
+    st.caption("黑灰产情报采集与分析实时概览")
+
+    # ── Asymmetric KPI row: primary metric larger, three secondary ──
+    # Layout: [hero metric 2x] [secondary metrics 1x] [secondary metrics 1x]
+    left, mid, right = st.columns([2, 1, 1])
+
+    with left:
+        # Hero metric — "high risk" is the most important signal
+        high_risk = s.get("high_risk_count", 0)
+        st.metric("⚠️ 高危情报", high_risk)
+
+    with mid:
         st.metric("今日采集", s.get("today_count", 0))
-    with k2:
         st.metric("待分析", s.get("pending_count", 0))
-    with k3:
-        st.metric("高危情报", s.get("high_risk_count", 0))
-    with k4:
+
+    with right:
         st.metric("累计实体", s.get("entity_count", 0))
 
     st.divider()
 
-    # ---- Distribution + Recent ----
-    a, b = st.columns([1, 1])
+    # ── Content area: distribution (wider) + recent (narrower) ──
+    a, b = st.columns([1.4, 1])
 
     with a:
         st.markdown("#### 风险类型分布")
@@ -82,8 +87,7 @@ def show():
                 plat = r.get("source_platform", "")
                 when = str(r.get("collected_at", ""))[:19]
                 st.markdown(
-                    f"""<div style="background:{T.BG_CARD};border:1px solid {T.BORDER};
-                    border-radius:8px;padding:0.65rem 0.8rem;margin-bottom:0.4rem">
+                    f"""<div class="dossier-card" style="padding:0.65rem 0.8rem;margin-bottom:0.4rem">
                     <div style="display:flex;justify-content:space-between;align-items:center">
                     <span style="font-size:0.84rem;color:{T.TEXT_MAIN}">{txt}{'...' if len(txt) >= 56 else ''}</span>
                     {T.badge(p)}</div>
@@ -95,27 +99,28 @@ def show():
 
     st.divider()
 
-    # ---- System status ----
+    # ── System status — compact row ──
     st.markdown("#### 系统状态")
-    c1, c2, c3 = st.columns(3)
 
     svc_info = [
-        ("MySQL", "localhost:3306", "业务数据存储"),
-        ("Neo4j", "localhost:7687", "知识图谱引擎"),
-        ("Milvus", "localhost:19530", "向量检索引擎"),
+        ("MySQL",   "业务数据存储",     "localhost:3306"),
+        ("Neo4j",   "知识图谱引擎",     "localhost:7687"),
+        ("Milvus",  "向量检索引擎",     "localhost:19530"),
     ]
-    for col, (name, host, desc) in zip([c1, c2, c3], svc_info):
+
+    cols = st.columns(3)
+    for col, (name, desc, host) in zip(cols, svc_info):
         up = svc.get(name, False)
-        color = T.SAGE if up else T.ROSE
-        status_text = "运行中" if up else "未连接"
+        dot = T.SAGE if up else T.ROSE
+        label = "运行中" if up else "未连接"
         with col:
             st.markdown(
-                f"""<div style="background:{T.BG_CARD};border:1px solid {T.BORDER};border-radius:8px;
-                padding:0.8rem 1rem;">
-                <div style="display:flex;align-items:center;gap:0.7rem;margin-bottom:0.25rem">
-                <div style="width:8px;height:8px;border-radius:50%;background:{color}"></div>
-                <div style="font-weight:500;color:{T.TEXT_MAIN};font-size:0.88rem">{name}</div>
-                <span style="font-size:0.68rem;color:{color};font-weight:500">{status_text}</span></div>
-                <div style="font-size:0.7rem;color:{T.TEXT_MUTED}">{desc} · {host}</div></div>""",
+                f"""<div style="display:flex;align-items:center;gap:0.6rem;
+                padding:0.5rem 0.8rem;font-size:0.82rem">
+                <span style="width:6px;height:6px;border-radius:50%;background:{dot};display:inline-block;flex-shrink:0"></span>
+                <span style="font-weight:500;color:{T.TEXT_MAIN}">{name}</span>
+                <span style="color:{dot};font-size:0.72rem;font-weight:500">{label}</span>
+                <span style="color:{T.TEXT_MUTED};font-size:0.7rem;margin-left:auto">{host}</span>
+                </div>""",
                 unsafe_allow_html=True,
             )

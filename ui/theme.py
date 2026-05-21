@@ -1,4 +1,9 @@
-"""BGI Design System — Editorial Intelligence Bureau aesthetic."""
+"""BGI Design System — Editorial Intelligence Bureau aesthetic.
+
+Follows frontend-design skill workflow:
+  Frame → Visual System → Compose with intention → Meaningful motion
+  Direction: "Editorial" — classified intelligence dossier, institutional warmth.
+"""
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 WHITE      = "#FFFFFF"
@@ -16,9 +21,9 @@ ROSE_DARK  = "#9E7A77"
 BORDER     = "#D5CFC5"
 DIVIDER    = "#E4DDD3"
 GOLD       = "#B8976A"
+INK        = "#1E1B18"
 
 # ── Typography ───────────────────────────────────────────────────────────────
-# Distinctive, non-generic fonts — NOT Inter/Roboto/Arial
 FONT_DISPLAY = "Noto Serif SC"
 FONT_BODY    = "Work Sans"
 FONT_MONO    = "JetBrains Mono"
@@ -29,6 +34,19 @@ CSS = f"""
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@400;500;600;700&family=Work+Sans:wght@350;450;550&display=swap');
 
 * {{ font-family: '{FONT_BODY}', system-ui, sans-serif; }}
+
+/* ═══ Entrance animation ═══ */
+@keyframes fade-up {{
+    from {{ opacity: 0; transform: translateY(12px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
+}}
+@keyframes fade-in {{
+    from {{ opacity: 0; }}
+    to   {{ opacity: 1; }}
+}}
+.stMain > div > div > div > div {{
+    animation: fade-up 0.55s cubic-bezier(0.22, 0.61, 0.36, 1);
+}}
 
 /* ═══ Shell ═══ */
 .stApp {{
@@ -47,7 +65,6 @@ header[data-testid="stHeader"] {{ background: transparent !important; box-shadow
     border-right: 1px solid {BORDER};
 }}
 
-/* Sidebar nav buttons */
 [data-testid="stSidebar"] .stButton > button {{
     background: transparent; color: {TEXT_SOFT}; border: none;
     border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.85rem;
@@ -79,7 +96,7 @@ h2 {{ color: {TEXT_MAIN} !important; font-weight: 500 !important; font-size: 1.1
 h3 {{ color: {TEXT_SOFT} !important; font-weight: 500 !important; font-size: 1rem !important; }}
 .stCaption {{ font-family: '{FONT_BODY}', sans-serif !important; color: {TEXT_MUTED} !important; font-size: 0.82rem !important; }}
 
-/* ═══ Metric cards ═══ */
+/* ═══ Metric cards — elevated for key intel ═══ */
 [data-testid="stMetric"] {{
     background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 6px;
     padding: 1.1rem 1.3rem;
@@ -103,6 +120,29 @@ h3 {{ color: {TEXT_SOFT} !important; font-weight: 500 !important; font-size: 1re
     font-family: '{FONT_MONO}', monospace !important;
     letter-spacing: -0.02em;
 }}
+
+/* Critical metric — rose accent */
+.critical-metric [data-testid="stMetric"] {{ border-left: 3px solid {ROSE}; }}
+
+/* ═══ Asymmetric dossier card ═══ */
+.dossier-card {{
+    background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 8px;
+    padding: 1.2rem 1.4rem; position: relative; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(45,42,37,0.03);
+    transition: box-shadow 0.25s;
+}}
+.dossier-card:hover {{ box-shadow: 0 6px 18px rgba(45,42,37,0.05); }}
+.dossier-card::before {{
+    content: ''; position: absolute; top: 0; left: 0;
+    width: 100%; height: 2px;
+    background: linear-gradient(90deg, {GOLD}, transparent);
+    opacity: 0; transition: opacity 0.3s;
+}}
+.dossier-card:hover::before {{ opacity: 1; }}
+
+/* ═══ Horizontal rule — gold accent ═══ */
+hr {{ border: none; border-top: 1px solid {DIVIDER}; margin: 1.2rem 0; }}
+.hr-accent {{ border: none; height: 1px; background: linear-gradient(90deg, {GOLD}, transparent); margin: 1rem 0; }}
 
 /* ═══ Tables ═══ */
 [data-testid="stDataFrame"] {{
@@ -128,7 +168,7 @@ h3 {{ color: {TEXT_SOFT} !important; font-weight: 500 !important; font-size: 1re
 /* ═══ Buttons ═══ */
 div[data-testid="stVerticalBlock"] .stButton > button,
 div[data-testid="column"] .stButton > button {{
-    background: {TEXT_MAIN}; color: {WHITE}; border: none; border-radius: 6px;
+    background: {INK}; color: {WHITE}; border: none; border-radius: 6px;
     padding: 0.5rem 1.4rem; font-weight: 500; font-size: 0.85rem;
     transition: all 0.2s;
     font-family: '{FONT_BODY}', sans-serif !important;
@@ -145,8 +185,8 @@ div[data-testid="stVerticalBlock"] .stButton > button:hover {{
     font-family: '{FONT_BODY}', sans-serif !important;
 }}
 .stTextInput input:focus {{
-    border-color: {TEXT_MAIN} !important;
-    box-shadow: 0 0 0 1px {TEXT_MAIN} !important;
+    border-color: {INK} !important;
+    box-shadow: 0 0 0 1px {INK} !important;
 }}
 div[data-baseweb="popover"] {{
     border-color: {BORDER} !important; border-radius: 6px !important;
@@ -157,9 +197,6 @@ div[data-baseweb="popover"] [role="option"]:hover > div {{
 div[data-baseweb="popover"] [aria-selected="true"] > div {{
     background: {BG_SIDEBAR} !important;
 }}
-
-/* ═══ Dividers ═══ */
-hr {{ border-color: {DIVIDER} !important; }}
 
 /* ═══ Badges ═══ */
 .badge-high {{
@@ -193,9 +230,9 @@ hr {{ border-color: {DIVIDER} !important; }}
     font-size: 0.82rem;
 }}
 
-/* ═══ Info block ═══ */
+/* ═══ Info / callout ═══ */
 [data-testid="stInfo"] {{
-    background: {BG_CARD}; border-left: 2px solid {TEXT_MAIN};
+    background: {BG_CARD}; border-left: 2px solid {INK};
     color: {TEXT_SOFT}; border-radius: 4px;
 }}
 
@@ -216,11 +253,11 @@ hr {{ border-color: {DIVIDER} !important; }}
 ::-webkit-scrollbar-track {{ background: transparent; }}
 ::-webkit-scrollbar-thumb {{ background: {BORDER}; border-radius: 2px; }}
 
-/* ═══ Selectbox fix ═══ */
+/* ═══ Selectbox ═══ */
 [data-testid="stSelectbox"] {{ font-family: '{FONT_BODY}', sans-serif !important; }}
 
 /* ═══ Spinner ═══ */
-.stSpinner > div {{ border-color: {TEXT_MAIN} transparent transparent transparent !important; }}
+.stSpinner > div {{ border-color: {INK} transparent transparent transparent !important; }}
 </style>
 """
 
@@ -233,3 +270,12 @@ def badge(p: str) -> str:
 
 def empty(icon: str, title: str, desc: str) -> str:
     return f'<div class="empty-state"><div class="icon">{icon}</div><div class="title">{title}</div><div class="desc">{desc}</div></div>'
+
+
+def dossier(title: str, body: str) -> str:
+    """A distinguished card with gold top-bar reveal on hover."""
+    return f'<div class="dossier-card"><div style="font-family:\'{FONT_DISPLAY}\',serif;font-size:0.9rem;font-weight:500;color:{TEXT_MAIN};margin-bottom:0.5rem">{title}</div><div style="font-size:0.82rem;color:{TEXT_SOFT}">{body}</div></div>'
+
+
+def hr_accent() -> str:
+    return f'<div class="hr-accent"></div>'
