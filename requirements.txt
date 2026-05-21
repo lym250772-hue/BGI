@@ -1,0 +1,52 @@
+# Core
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+loguru>=0.7.0
+click>=8.0.0
+httpx>=0.25.0
+
+# Database
+pymysql>=1.1.0
+neo4j>=5.20.0
+pymilvus>=2.4.0
+sqlalchemy>=2.0.0
+
+# Collection
+scrapy>=2.11.0
+playwright>=1.40.0
+telethon>=1.36.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Cleaning & NLP
+scikit-learn>=1.3.0
+jieba>=0.42.1
+# simhash-py is skipped due to C++ compiler dependency; pure Python fallback used
+# simhash-py>=0.4.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# ML & Embedding
+torch>=2.1.0
+transformers>=4.36.0
+sentence-transformers>=2.2.0
+
+# OCR
+paddleocr>=2.7.0
+paddlepaddle>=2.6.0
+Pillow>=10.0.0
+
+# API & UI
+fastapi>=0.109.0
+uvicorn>=0.25.0
+streamlit>=1.30.0
+pyvis>=0.3.0
+
+# Graph visualization
+networkx>=3.2.0
+matplotlib>=3.8.0
+
+# Utils
+tqdm>=4.66.0
+pyyaml>=6.0.0
