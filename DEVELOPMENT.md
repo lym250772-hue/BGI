@@ -1,5 +1,19 @@
 # BGI 开发指南
 
+## v0.4 架构更新（2026-05-22）
+
+| 模块 | 变更 |
+|------|------|
+| 安全去激活 | 新增 `analyzer/defanger.py` — URL/IP/Email 去激活化安全展示 |
+| 多模态处理 | 新增 `cleaner/media_processor.py` — 图片 OCR + 音频 ASR + 视频帧提取 |
+| LLM 降级 | `engine.py` 重写 — tenacity 指数退避重试 + 断路器（5 次连续失败切换 L1+L2） |
+| HITL 闭环 | `mysql_store.py` 新增 `annotation_log` 表 + 黑话/分类人工修正自动同步 |
+| Neo4j v0.4 Schema | 5 种节点标签 + 4 种关系类型 + 共享联系人团伙检测 |
+| Mock 数据 | 新增 `scripts/generate_mock_data.py` — 18 套模板覆盖全部意图标签 |
+| 测试 | 37 个测试全部通过（新增 10 个） |
+
+---
+
 ## 协作开发设置
 
 ### 1. 仓库管理员配置
@@ -126,26 +140,28 @@ test: 添加分类器边界用例
 
 | 文件 | 说明 |
 |------|------|
-| `__init__.py` | 包标识（空文件） |
+| `__init__.py` | 导出 `CleaningPipeline` / `MediaProcessor` / `media_processor` |
 | `pipeline.py` | `CleaningPipeline` 类：normalize → compute_simhash → is_noise → mark_priority → process |
 | `simhash_py.py` | 纯 Python SimHash 64 位指纹实现（中文 bigram + 英文 unigram tokenizer + MD5 哈希加权） |
+| `media_processor.py` | 多模态处理：图片 OCR（PaddleOCR 中英文）、视频帧提取+OCR、音频/视频语音转文字（faster-whisper）。懒加载模型，未安装时优雅降级 |
 
 ### `analyzer/` —— 分析引擎层
 
 | 文件 | 说明 |
 |------|------|
-| `__init__.py` | 导出 `IntentClassifier` / `EntityExtractor` / `AnalysisEngine` |
-| `classifier.py` | `IntentClassifier`：L1 关键词（16 条 regex）→ L2 RoBERTa（预留）→ L3 LLM API 三级分类 |
-| `entity_extractor.py` | `EntityExtractor`：L1 正则（8 种）→ L2 词典 → L3 Milvus Embedding → L4 LLM 四层级联 |
-| `engine.py` | `AnalysisEngine` 单例：classify → extract → MySQL → Neo4j sync → Milvus embed 全流程编排 |
+| `__init__.py` | 导出 `IntentClassifier` / `EntityExtractor` / `AnalysisEngine` / `defanger` |
+| `classifier.py` | `IntentClassifier`：L1 关键词（20 条 regex）→ L2 RoBERTa（预留）→ L3 LLM API 三级分类。支持 `skip_llm=True` 降级模式 |
+| `entity_extractor.py` | `EntityExtractor`：L1 正则（9 种实体类型）→ L2 词典 → L3 Milvus Embedding → L4 LLM 四层级联。新增 `extract_l1_l2_only()` 降级方法 |
+| `engine.py` | `AnalysisEngine` 单例：classify → extract → MySQL → Neo4j sync → Milvus embed 全流程编排。内置 **LLM 降级机制**：tenacity 指数退避重试（3 次）+ 断路器（连续 5 次失败自动切换 L1+L2），支持手动 `reset_circuit()` 恢复 |
+| `defanger.py` | 安全去激活：URL → `hxxp[://]evil[.]com`、IP → `192[.]168[.]1[.]1`、Email → `bad@phish[.]com`。支持 `defang_text()` 全文本处理 + `refang()` 逆向还原。幂等安全，多次调用不重复加壳 |
 
 ### `storage/` —— 存储层
 
 | 文件 | 说明 |
 |------|------|
 | `__init__.py` | 注释文件（"Storage layer – imports are lazy to allow offline testing"） |
-| `mysql_store.py` | `MySQLStore`：6 表 CRUD、daily_stats、list_raw（支持状态/优先级/平台过滤） |
-| `neo4j_store.py` | `Neo4jStore`：节点 upsert、关系创建、co-occurrence 边、团伙发现（共享实体模式）、最短路径 |
+| `mysql_store.py` | `MySQLStore`：6 表 CRUD、daily_stats、list_raw（支持状态/优先级/平台过滤）。**v0.4 新增**：`annotation_log` 表 + `log_annotation()` / `sync_slang_correction()` / `sync_classification_correction()` / `get_pending_annotations()` HITL 闭环反馈方法 |
+| `neo4j_store.py` | `Neo4jStore`：**v0.4 精化 Schema** — 5 种节点标签（Intel / Account / Tool / Contact / Link）+ 4 种关系类型（MENTIONS / PROMOTES / USES_CONTACT / CO_OCCURS）。共享联系人团伙发现（`discover_gangs()` / `get_gang_members()`）、pyvis 图数据导出（`get_refined_graph()`）、最短路径查询。向后兼容旧 Entity + EXTRACTED_FROM 模式 |
 | `milvus_store.py` | `MilvusStore`：slang_embeddings + intel_embeddings 两个集合，COSINE 相似度检索 |
 
 ### `api/` —— API 服务层
@@ -164,8 +180,8 @@ test: 添加分类器边界用例
 | `theme.py` | 莫兰迪配色系统：色板常量、CSS 模板、工具函数 |
 | `pages/__init__.py` | 包标识（空文件） |
 | `pages/dashboard.py` | 仪表盘：KPI 卡片、风险分布柱状图、最近情报、系统状态 |
-| `pages/intel_list.py` | 情报列表：四维筛选（关键词/平台/风险/优先级）+ 数据表格 |
-| `pages/entities.py` | 实体库：按类型 Tab + 统计卡片 |
+| `pages/intel_list.py` | 情报列表：四维筛选（关键词/平台/风险/优先级）+ 数据表格（显示时自动 defang 恶意链接） |
+| `pages/entities.py` | 实体库：按类型 Tab + 统计卡片（URL/IP 类实体自动 defang 显示） |
 | `pages/graph.py` | 知识图谱：Neo4j 查询 + pyvis 力导向图 |
 | `pages/cheat_scripts.py` | 作弊剧本：LLM 生成滥用链路 + 工具 + 对抗建议 |
 | `pages/slang_dict.py` | 黑话词典：搜索 + 分类筛选 + 数据表格 |
@@ -183,8 +199,9 @@ test: 添加分类器边界用例
 |------|------|
 | `__init__.py` | 包标识（空文件） |
 | `test_cleaner.py` | 清洗管道 14 个测试：HTML 剥离、空白折叠、SimHash 确定性、海明距离、噪声检测、优先级标记、全流程 |
-| `test_classifier.py` | 分类器 6 个测试：账号交易/刷单/贷款/赌博关键词命中、未命中、级联策略 |
-| `test_entity_extractor.py` | 实体抽取 7 个测试：手机号/微信/QQ/URL 正则提取、多实体、词典匹配、空文本 |
+| `test_classifier.py` | 分类器 7 个测试：账号交易/刷单/贷款/赌博关键词命中、未命中、级联策略、`skip_llm` 降级模式 |
+| `test_entity_extractor.py` | 实体抽取 8 个测试：手机号/微信/QQ/URL 正则提取、多实体、词典匹配、空文本、`extract_l1_l2_only` 降级方法 |
+| `test_defanger.py` | 安全去激活 8 个测试：URL/IP/Email 单独去激活、全文本混合去激活、幂等性验证、逆向还原、空输入边界 |
 
 ### `data/` —— 数据目录
 
@@ -197,7 +214,11 @@ test: 添加分类器边界用例
 
 ### `scripts/` —— 工具脚本
 
-预留目录，用于数据迁移、模型训练、批量导入等辅助脚本。
+| 文件 | 说明 |
+|------|------|
+| `generate_mock_data.py` | Mock 数据生成器：18 套模板覆盖全部 7 种意图标签，可复现随机种子，支持 `--dry-run` / `--no-neo4j`。用法：`python scripts/generate_mock_data.py -n 200 --seed 42` |
+| `import_seed_slang.py` | 种子黑话导入：将 CSV/JSON 格式的黑话批量写入 MySQL `slang_dict` 并嵌入 Milvus。内置 15 条种子数据。用法：`python scripts/import_seed_slang.py --file data/slang.csv` |
+| `train_roberta.py` | RoBERTa 微调占位脚本：等待标注数据后用于训练 L2 分类器。用法：`python scripts/train_roberta.py --data data/labeled_intel.csv --epochs 3` |
 
 ---
 
@@ -216,10 +237,32 @@ annotation_log    — 人工标注日志
 
 ### Neo4j
 
+**v0.4 精化 Schema：**
+
 ```
-节点：Intel（情报）、Entity（实体）
-关系：EXTRACTED_FROM（实体←情报）、CO_OCCURS（实体共现）
-约束：Entity.uuid 唯一、Intel.raw_id 唯一
+节点（5 种标签）：
+  Intel     — 情报条目（raw_id 唯一约束）
+  Account   — 账号类实体（wechat / qq / alipay）
+  Tool      — 工具类实体（外挂 / 脚本 / 接码平台）
+  Contact   — 联系方式（phone / email / bank_card）
+  Link      — 链接类实体（url / domain / ip）
+  （保留旧 Entity 标签用于向后兼容）
+
+关系（4 种类型）：
+  MENTIONS    — Intel → Account / Contact（情报提及账号或联系方式）
+  PROMOTES    — Intel → Link / Tool（情报推广链接或工具）
+  USES_CONTACT — Account → Contact（账号使用某联系方式）
+  CO_OCCURS   — Account → Account / Entity → Entity（共享联系人团伙发现）
+  （保留旧 EXTRACTED_FROM 用于向后兼容）
+
+团伙检测查询：
+  (Account A)-[:USES_CONTACT]->(Contact X)<-[:USES_CONTACT]-(Account B)
+  → (Account A)-[:CO_OCCURS]-(Account B)
+
+约束（8 条）：
+  Entity.uuid + Intel.raw_id 唯一
+  Account.value / Tool.value / Contact.value / Link.value 唯一
+  + 3 个精化标签索引
 ```
 
 ### Milvus
@@ -234,7 +277,7 @@ intel_embeddings  — 384 维情报向量（COSINE / IVF_FLAT）
 ## 开发约定
 
 1. **存储层懒加载** — `engine.py` 和 `entity_extractor.py` 使用 `_mysql()` / `_neo4j()` / `_milvus()` 函数延迟导入，确保离线测试不需要数据库连接
-2. **测试独立** — 所有 27 个测试不依赖数据库、不依赖网络，`python -m pytest tests/` 秒级完成
+2. **测试独立** — 所有 37 个测试不依赖数据库、不依赖网络，`python -m pytest tests/` 秒级完成
 3. **配置集中** — 所有配置项在 `config/settings.py`，通过 `.env` 文件覆盖
 4. **环境隔离** — `.env` 不入库，`.env.template` 作为模板
 5. **中英混合** — 代码标识符英文，注释/文档中文为主
