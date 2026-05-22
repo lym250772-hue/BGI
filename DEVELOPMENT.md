@@ -14,26 +14,6 @@
 
 ---
 
-## 协作开发设置
-
-### 1. 仓库管理员配置
-
-项目使用 GitHub 仓库：https://github.com/lym250772-hue/BGI
-
-**将协作者设为管理员：**
-1. 打开 https://github.com/lym250772-hue/BGI/settings/access
-2. 点击 「Add people」
-3. 输入协作者 GitHub 用户名
-4. 角色选择 **Admin**（管理员）
-5. 对方接受邀请后即拥有完整仓库权限（push / merge / settings）
-
-### 2. 双方同步开发环境
-
-```bash
-# 双方均执行
-git clone git@github.com:lym250772-hue/BGI.git
-cd BGI
-
 # 启动基础设施
 cd docker && docker compose up -d && cd ..
 
