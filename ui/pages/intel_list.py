@@ -71,9 +71,11 @@ def show():
 
     st.caption(f"共 {len(rows)} 条")
 
+    from analyzer.defanger import defang_text
+
     df = pd.DataFrame([{
         "ID":   r["id"],
-        "内容": (r.get("content") or r.get("content_raw", ""))[:80],
+        "内容": defang_text((r.get("content") or r.get("content_raw", ""))[:80]),
         "来源": r.get("source_platform", ""),
         "风险": r.get("intent_label", "") or "未分类",
         "优先级": r.get("priority", "normal"),

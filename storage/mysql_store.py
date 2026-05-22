@@ -122,6 +122,20 @@ class MySQLStore:
             generated_by VARCHAR(32) DEFAULT 'llm',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+        CREATE TABLE IF NOT EXISTS annotation_log (
+            id BIGINT PRIMARY KEY AUTO_INCREMENT,
+            target_type VARCHAR(32) NOT NULL,
+            target_id BIGINT,
+            field_name VARCHAR(64),
+            old_value TEXT,
+            new_value TEXT NOT NULL,
+            corrected_by VARCHAR(64),
+            synced TINYINT(1) DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_target (target_type, target_id),
+            INDEX idx_synced (synced)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """
         with self.cursor() as c:
             for stmt in ddl.split(";"):
@@ -230,6 +244,70 @@ class MySQLStore:
     def list_slang(self, status: str = "active") -> list[dict]:
         with self.cursor() as c:
             c.execute("SELECT * FROM slang_dict WHERE status=%s", (status,))
+            return c.fetchall()
+
+    # ------------------------------------------------------------------
+    # HITL Feedback — annotation_log + auto-sync
+    # ------------------------------------------------------------------
+
+    def log_annotation(self, target_type: str, target_id: int, field_name: str,
+                       old_value: str, new_value: str, corrected_by: str = None):
+        """Record a human correction in the annotation log."""
+        sql = """INSERT INTO annotation_log
+            (target_type, target_id, field_name, old_value, new_value, corrected_by)
+        VALUES (%s, %s, %s, %s, %s, %s)"""
+        with self.cursor() as c:
+            c.execute(sql, (target_type, target_id, field_name, old_value, new_value, corrected_by))
+
+    def sync_slang_correction(self, slang: str, normalized_meaning: str,
+                              category: str = None, corrected_by: str = None) -> bool:
+        """HITL closed-loop: when user corrects slang, update slang_dict and
+        mark annotation_log as synced. Caller should re-embed to Milvus.
+
+        Returns True if the slang_dict row was inserted/updated.
+        """
+        self.insert_slang({
+            "slang": slang,
+            "normalized_meaning": normalized_meaning,
+            "category": category,
+            "source": "manual",
+            "status": "active",
+        })
+        # Mark pending annotations as synced
+        with self.cursor() as c:
+            c.execute(
+                """UPDATE annotation_log SET synced=1
+                   WHERE target_type='slang' AND field_name='normalized_meaning'
+                   AND new_value=%s AND synced=0""",
+                (normalized_meaning,),
+            )
+        logger.info(f"HITL slang correction synced: '{slang}' → '{normalized_meaning}'")
+        return True
+
+    def sync_classification_correction(self, raw_data_id: int, intent_label: str,
+                                       sub_label: str = "", corrected_by: str = None) -> bool:
+        """HITL closed-loop: when user corrects classification, update
+        analysis_results and mark annotation_log as synced.
+        """
+        with self.cursor() as c:
+            c.execute(
+                """UPDATE analysis_results
+                   SET intent_label=%s, sub_label=%s, classification_method='manual'
+                   WHERE raw_data_id=%s""",
+                (intent_label, sub_label, raw_data_id),
+            )
+            c.execute(
+                """UPDATE annotation_log SET synced=1
+                   WHERE target_type='classification' AND target_id=%s AND synced=0""",
+                (raw_data_id,),
+            )
+        logger.info(f"HITL classification correction synced for raw_id={raw_data_id}")
+        return True
+
+    def get_pending_annotations(self) -> list[dict]:
+        """Get unsynced annotations for batch processing."""
+        with self.cursor() as c:
+            c.execute("SELECT * FROM annotation_log WHERE synced=0 ORDER BY created_at")
             return c.fetchall()
 
     # ------------------------------------------------------------------

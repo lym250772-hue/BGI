@@ -60,11 +60,13 @@ def show():
                 st.caption("暂无此类实体")
                 continue
 
+            from analyzer.defanger import defang_text
+
             df = pd.DataFrame([{
                 "ID":    e["id"],
-                "实体值": e["entity_value"],
+                "实体值": defang_text(e["entity_value"]) if e["entity_type"] in ("url", "ip") else e["entity_value"],
                 "方式":   e["extraction_method"],
-                "上下文": (e.get("context") or "")[:60],
+                "上下文": defang_text((e.get("context") or "")[:60]),
                 "时间":   str(e.get("created_at", ""))[:19] if e.get("created_at") else "",
             } for e in subset])
             st.dataframe(df, width="stretch", hide_index=True)

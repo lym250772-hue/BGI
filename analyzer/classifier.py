@@ -63,7 +63,8 @@ class IntentClassifier:
 
     def _load_roberta(self):
         """Load fine-tuned RoBERTa model. Returns a stub until training is done."""
-        model_path = settings.roberta_model_path
+        from pathlib import Path
+        model_path = Path(settings.roberta_model_path) if settings.roberta_model_path else None
         if model_path and model_path.exists():
             try:
                 from transformers import pipeline
@@ -153,8 +154,11 @@ class IntentClassifier:
     # Cascade entry point
     # ------------------------------------------------------------------
 
-    def classify(self, text: str) -> dict:
+    def classify(self, text: str, skip_llm: bool = False) -> dict:
         """Run the full cascade: L1 → L2 → L3.
+
+        When skip_llm=True (degraded mode), skips LLM and returns best
+        available result from L1/L2, or a low-confidence default.
 
         Returns dict with keys: intent_label, sub_label, confidence, method.
         """
@@ -172,7 +176,11 @@ class IntentClassifier:
             return {"intent_label": label, "sub_label": sub, "confidence": conf,
                     "method": ClassificationMethod.ROBERTA}
 
-        # L3
+        # L3 — skip if circuit breaker is open or explicitly degraded
+        if skip_llm:
+            return {"intent_label": IntentLabel.CHEATING, "sub_label": "未分类",
+                    "confidence": 0.30, "method": "degraded"}
+
         label, sub, conf = self.classify_llm(text)
         return {"intent_label": label, "sub_label": sub, "confidence": conf,
                 "method": ClassificationMethod.LLM}

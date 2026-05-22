@@ -46,3 +46,11 @@ def test_classify_cascade_uses_keyword(clf):
     result = clf.classify("出抖音千粉号 量大优惠")
     assert result["method"].value == "keyword"
     assert result["confidence"] > 0.9
+
+
+def test_classify_skip_llm_degraded(clf):
+    """When skip_llm=True and no L1/L2 match, should return degraded result."""
+    result = clf.classify("一份普通的商业报告内容没有实际风险", skip_llm=True)
+    assert result["method"] == "degraded"
+    assert result["confidence"] == 0.30
+    assert "intent_label" in result

@@ -214,3 +214,15 @@ class EntityExtractor:
             })
 
         return entities
+
+    def extract_l1_l2_only(self, text: str, embed_fn=None, intent_label: str = "") -> list[dict]:
+        """Degraded extraction: L1 (regex) + L2 (dict) + L3 (embedding) only.
+
+        Skips LLM entirely. Used when circuit breaker is open or LLM is unavailable.
+        """
+        entities = []
+        entities.extend(self.extract_regex(text))
+        entities.extend(self.extract_dict(text))
+        if embed_fn is not None:
+            entities.extend(self.detect_slang_variants(text, embed_fn))
+        return entities

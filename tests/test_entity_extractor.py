@@ -57,3 +57,17 @@ def test_extract_dict_known_slang(extractor):
 def test_extract_empty_text(extractor):
     entities = extractor.extract_regex("")
     assert entities == []
+
+
+def test_extract_l1_l2_only_no_llm(extractor):
+    """Degraded extraction should skip LLM entirely."""
+    extractor.load_slang_dict({"刷单": "虚假交易提升销量"})
+    entities = extractor.extract_l1_l2_only(
+        "微信 test123 招聘刷单 日结 电话 13812345678"
+    )
+    types = {e["entity_type"].value for e in entities}
+    methods = {e["extraction_method"].value for e in entities}
+    assert "wechat" in types
+    assert "phone" in types
+    assert "slang" in types
+    assert "llm" not in methods  # LLM must not be used

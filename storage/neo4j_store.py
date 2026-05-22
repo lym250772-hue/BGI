@@ -1,7 +1,47 @@
-"""Neo4j knowledge graph layer for entity relationship discovery."""
+"""Neo4j knowledge graph layer for entity relationship discovery.
+
+Refined schema (v0.4):
+  Nodes:  Intel, Account, Tool, Contact, Link
+  Edges:  MENTIONS, PROMOTES, USES_CONTACT, CO_OCCURS
+
+Gang detection via shared-contact pattern:
+  (Account A)-[:USES_CONTACT]->(Contact X)<-[:USES_CONTACT]-(Account B)
+  → (Account A)-[:CO_OCCURS]-(Account B)
+"""
+
 from neo4j import GraphDatabase
 from loguru import logger
 from config.settings import settings
+
+# Entity type → refined node label mapping
+_TYPE_TO_LABEL = {
+    "wechat":    "Account",
+    "qq":        "Account",
+    "alipay":    "Account",
+    "phone":     "Contact",
+    "email":     "Contact",
+    "url":       "Link",
+    "domain":    "Link",
+    "ip":        "Link",
+    "bank_card": "Contact",
+    "tool":      "Tool",
+    "slang":     "Contact",
+}
+
+# Entity type → relationship type mapping
+_TYPE_TO_REL = {
+    "wechat":    "MENTIONS",
+    "qq":        "MENTIONS",
+    "alipay":    "MENTIONS",
+    "phone":     "MENTIONS",
+    "email":     "MENTIONS",
+    "url":       "PROMOTES",
+    "domain":    "PROMOTES",
+    "ip":        "PROMOTES",
+    "bank_card": "MENTIONS",
+    "tool":      "PROMOTES",
+    "slang":     "MENTIONS",
+}
 
 
 class Neo4jStore:
@@ -22,10 +62,20 @@ class Neo4jStore:
 
     def init_constraints(self):
         queries = [
+            # Legacy Entity constraints (backward compat)
             "CREATE CONSTRAINT IF NOT EXISTS FOR (e:Entity) REQUIRE e.uuid IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (i:Intel) REQUIRE i.raw_id IS UNIQUE",
             "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.type)",
             "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.value)",
+            # Refined schema constraints
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Account) REQUIRE a.value IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (t:Tool) REQUIRE t.value IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (c:Contact) REQUIRE c.value IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (l:Link) REQUIRE l.value IS UNIQUE",
+            # Indexes for refined labels
+            "CREATE INDEX IF NOT EXISTS FOR (a:Account) ON (a.type)",
+            "CREATE INDEX IF NOT EXISTS FOR (c:Contact) ON (c.type)",
+            "CREATE INDEX IF NOT EXISTS FOR (l:Link) ON (l.type)",
         ]
         with self.driver.session() as sess:
             for q in queries:
@@ -33,7 +83,7 @@ class Neo4jStore:
                     sess.run(q)
                 except Exception as ex:
                     logger.warning(f"Neo4j constraint: {ex}")
-        logger.info("Neo4j constraints initialized")
+        logger.info("Neo4j constraints initialized (legacy + refined schema)")
 
     # ------------------------------------------------------------------
     # Node creation / merge
@@ -131,6 +181,187 @@ class Neo4jStore:
             """, uuid_a=uuid_a, uuid_b=uuid_b)
             rec = result.single()
             return rec["path"] if rec else None
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Refined schema methods (v0.4) — concrete node labels + relationships
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _resolve_label(self, entity_type: str) -> str:
+        return _TYPE_TO_LABEL.get(entity_type, "Contact")
+
+    def _resolve_relationship(self, entity_type: str) -> str:
+        return _TYPE_TO_REL.get(entity_type, "MENTIONS")
+
+    def upsert_entity_refined(self, entity_type: str, value: str):
+        """Merge entity as a refined node label (Account/Tool/Contact/Link)."""
+        label = self._resolve_label(entity_type)
+        with self.driver.session() as sess:
+            sess.run(
+                f"""
+                MERGE (e:{label} {{value: $value}})
+                SET e.type = $type, e.uuid = $uuid
+                """,
+                value=value, type=entity_type,
+                uuid=f"{entity_type}:{value}",
+            )
+            # Also maintain legacy Entity node for backward compat
+            sess.run(
+                """
+                MERGE (e:Entity {uuid: $uuid})
+                SET e.type = $type, e.value = $value
+                """,
+                uuid=f"{entity_type}:{value}",
+                type=entity_type, value=value,
+            )
+
+    def link_entity_to_intel_refined(self, entity_type: str, value: str,
+                                     raw_data_id: int):
+        """Create typed relationship (MENTIONS/PROMOTES) from Intel to entity."""
+        label = self._resolve_label(entity_type)
+        rel = self._resolve_relationship(entity_type)
+        with self.driver.session() as sess:
+            sess.run(
+                f"""
+                MATCH (i:Intel {{raw_id: $raw_id}})
+                MATCH (e:{label} {{value: $value}})
+                MERGE (i)-[:{rel}]->(e)
+                """,
+                raw_id=raw_data_id, value=value,
+            )
+            # Also maintain legacy EXTRACTED_FROM for backward compat
+            sess.run(
+                """
+                MATCH (i:Intel {raw_id: $raw_id})
+                MATCH (e:Entity {uuid: $uuid})
+                MERGE (e)-[:EXTRACTED_FROM]->(i)
+                """,
+                raw_id=raw_data_id,
+                uuid=f"{entity_type}:{value}",
+            )
+
+    def link_co_occurrence_refined(self, type_a: str, val_a: str,
+                                   type_b: str, val_b: str, raw_data_id: int):
+        """Create CO_OCCURS edge between co-mentioned entities."""
+        label_a = self._resolve_label(type_a)
+        label_b = self._resolve_label(type_b)
+        with self.driver.session() as sess:
+            sess.run(
+                f"""
+                MATCH (a:{label_a} {{value: $val_a}})
+                MATCH (b:{label_b} {{value: $val_b}})
+                MERGE (a)-[:CO_OCCURS {{raw_id: $raw_id}}]->(b)
+                """,
+                val_a=val_a, val_b=val_b, raw_id=raw_data_id,
+            )
+
+    def discover_gangs(self):
+        """Find Accounts sharing the same Contact → create CO_OCCURS edges.
+
+        This is the core gang-detection query: when two different Accounts
+        use the same Contact (phone/email/bank_card), they are likely
+        operated by the same group.
+        """
+        with self.driver.session() as sess:
+            result = sess.run("""
+                MATCH (c:Contact)
+                MATCH (a1:Account)-[:MENTIONS]->()<-[:MENTIONS]-(i:Intel)
+                MATCH (i)-[:MENTIONS]->(c)
+                MATCH (a2:Account)-[:MENTIONS]->()<-[:MENTIONS]-(i2:Intel)
+                MATCH (i2)-[:MENTIONS]->(c)
+                WHERE a1.value < a2.value
+                WITH a1, a2, c, COUNT(DISTINCT i) + COUNT(DISTINCT i2) AS shared
+                MERGE (a1)-[:CO_OCCURS {reason: 'SHARED_CONTACT', contact: c.value}]->(a2)
+                RETURN a1.value, a2.value, c.value, shared
+                LIMIT 100
+            """)
+            return [dict(r) for r in result]
+
+    def get_gang_members(self, min_shared: int = 2) -> list[dict]:
+        """Return groups of Accounts linked by shared Contacts (potential gangs)."""
+        with self.driver.session() as sess:
+            result = sess.run(
+                """
+                MATCH (a1:Account)-[r:CO_OCCURS]->(a2:Account)
+                WHERE r.reason = 'SHARED_CONTACT'
+                RETURN a1.value AS account_a, a2.value AS account_b,
+                       r.contact AS shared_contact
+                LIMIT 50
+                """
+            )
+            return [dict(r) for r in result]
+
+    def get_refined_graph(self, search: str = "", limit: int = 50) -> tuple:
+        """Return (nodes, edges) for pyvis visualization with refined labels."""
+        nodes, edges = [], []
+        seen = set()
+
+        with self.driver.session() as sess:
+            if search:
+                result = sess.run(
+                    """
+                    MATCH (i:Intel)-[r]-(e)
+                    WHERE e.value CONTAINS $q
+                      AND (type(r) IN ['MENTIONS', 'PROMOTES', 'EXTRACTED_FROM'])
+                    RETURN i, r, e, labels(e) AS elabels
+                    LIMIT $limit
+                    """,
+                    q=search, limit=limit,
+                )
+            else:
+                result = sess.run(
+                    """
+                    MATCH (i:Intel)-[r]-(e)
+                    WHERE type(r) IN ['MENTIONS', 'PROMOTES', 'EXTRACTED_FROM']
+                    RETURN i, r, e, labels(e) AS elabels
+                    LIMIT $limit
+                    """,
+                    limit=limit,
+                )
+
+            for rec in result:
+                i = rec["i"]
+                e = rec["e"]
+                r = rec["r"]
+                elabels = rec["elabels"]
+
+                iid = str(i.get("raw_id", ""))
+                eid = e.get("value", "")
+
+                if iid not in seen:
+                    nodes.append({
+                        "id": iid,
+                        "label": (i.get("text") or i.get("content_preview", ""))[:25],
+                        "group": "intel",
+                    })
+                    seen.add(iid)
+
+                if eid not in seen:
+                    # Use refined label for coloring
+                    if "Account" in elabels:
+                        group = "account"
+                    elif "Tool" in elabels:
+                        group = "tool"
+                    elif "Link" in elabels:
+                        group = "link"
+                    elif "Contact" in elabels:
+                        group = "contact"
+                    else:
+                        group = e.get("type", "entity")
+
+                    nodes.append({
+                        "id": eid,
+                        "label": f"{e.get('type', '')}:{eid}",
+                        "group": group,
+                    })
+                    seen.add(eid)
+
+                edges.append({
+                    "from": iid if r.start_node.get("raw_id") else eid,
+                    "to": eid if r.start_node.get("raw_id") else iid,
+                    "label": type(r).__name__,
+                })
+
+        return nodes, edges
 
 
 neo4j = Neo4jStore()
