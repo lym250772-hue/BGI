@@ -1,5 +1,16 @@
 # BGI 开发指南
 
+## v0.5 更新（2026-05-23）
+
+| 模块 | 变更 |
+|------|------|
+| 微博采集 | 新增 `collectors/weibo_collector.py` — Playwright 微博关键词搜索采集器，支持 Cookie 登录、翻页、HTML 解析 |
+| Spider 模块 | 新增 `collectors/spiders/weibo_spider.py` — 通用微博搜索 Spider，可独立使用或通过 WeiboCollector 调用 |
+| Milvus 批量 | `milvus_store.py` 新增 `insert_slang_batch()` 方法，支持批量插入黑话向量 |
+| 采集注册 | `registry.py` 新增 weibo 平台注册，支持 `--keywords` 和 `--max-pages-per-keyword` 参数 |
+
+---
+
 ## v0.4 架构更新（2026-05-22）
 
 | 模块 | 变更 |
@@ -130,11 +141,14 @@ test: 添加分类器边界用例
 
 | 文件 | 说明 |
 |------|------|
-| `__init__.py` | 包标识（空文件） |
+| `__init__.py` | 导出 `BaseCollector` / `IntelItem` / `TelegramCollector` / `WebCollector` / `WeiboCollector` |
 | `base.py` | `IntelItem` 数据类（12 个字段）+ `BaseCollector` 抽象基类 |
 | `telegram_collector.py` | Telethon 实现：遍历 TG 群消息，提取文本/图片/视频，计算 media hash |
 | `web_collector.py` | Scrapy + Playwright 实现：通用网页采集 |
-| `registry.py` | 平台 → 采集器工厂函数映射表 |
+| `weibo_collector.py` | Playwright 实现：微博关键词搜索采集器，符合 BaseCollector 接口，产出 IntelItem。支持 `keywords` / `max_pages_per_keyword` / `headless` 参数 |
+| `registry.py` | 平台 → 采集器工厂函数映射表（telegram / weibo / tieba / zhihu / xiaohongshu / forum） |
+| `spiders/__init__.py` | 导出 `WeiboSearchSpider` |
+| `spiders/weibo_spider.py` | 微博关键词搜索 Spider（Playwright）：Cookie 注入登录 / 搜索 URL 构造 / HTML 卡片解析 / 结构化字段提取（ParsedWeiboItem） |
 
 ### `cleaner/` —— 数据清洗层
 
@@ -202,6 +216,7 @@ test: 添加分类器边界用例
 | `test_classifier.py` | 分类器 7 个测试：账号交易/刷单/贷款/赌博关键词命中、未命中、级联策略、`skip_llm` 降级模式 |
 | `test_entity_extractor.py` | 实体抽取 8 个测试：手机号/微信/QQ/URL 正则提取、多实体、词典匹配、空文本、`extract_l1_l2_only` 降级方法 |
 | `test_defanger.py` | 安全去激活 8 个测试：URL/IP/Email 单独去激活、全文本混合去激活、幂等性验证、逆向还原、空输入边界 |
+| `test_weibo_search.py` | 微博搜索采集测试脚本：命令行直接运行，支持自定义关键词和翻页数，输出结构化解析结果 |
 
 ### `data/` —— 数据目录
 

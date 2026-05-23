@@ -107,7 +107,11 @@ BGI/
 │   ├── base.py              #   IntelItem 数据类 + BaseCollector 抽象
 │   ├── telegram_collector.py#   Telegram 采集器 (Telethon)
 │   ├── web_collector.py     #   Web 采集器 (Scrapy/Playwright)
-│   └── registry.py          #   采集器注册表
+│   ├── weibo_collector.py   #   微博搜索采集器 (Playwright)
+│   ├── registry.py          #   采集器注册表
+│   └── spiders/             #   平台爬虫实现
+│       ├── __init__.py      #   导出 WeiboSearchSpider
+│       └── weibo_spider.py  #   微博关键词搜索 Spider
 │
 ├── cleaner/                 # 数据清洗层
 │   ├── pipeline.py          #   清洗管道 (HTML→去噪→SimHash→优先级)
@@ -146,10 +150,11 @@ BGI/
 │   └── slang_dict/          #   黑话种子数据 (49条)
 │       └── seed_slang.json
 │
-├── tests/                   # 单元测试 (27/27 PASS)
+├── tests/                   # 单元测试 (28 tests)
 │   ├── test_cleaner.py      #   清洗管道测试
 │   ├── test_classifier.py   #   分类器测试
-│   └── test_entity_extractor.py  # 实体抽取测试
+│   ├── test_entity_extractor.py  # 实体抽取测试
+│   └── test_weibo_search.py #   微博搜索采集测试
 │
 ├── scripts/                 # 工具脚本（预留）
 └── config/                  # 全局配置

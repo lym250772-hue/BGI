@@ -8,17 +8,24 @@ class MilvusStore:
     """Manages embedding collections for slang and intel semantic search."""
 
     def __init__(self):
+        self._connected = False
+
+    def _connect(self):
+        if self._connected:
+            return
         connections.connect(
             alias="default",
             host=settings.milvus_host,
             port=settings.milvus_port,
         )
+        self._connected = True
 
     # ------------------------------------------------------------------
     # Init collections
     # ------------------------------------------------------------------
 
     def init_collections(self):
+        self._connect()
         self._init_slang_collection()
         self._init_intel_collection()
         logger.info("Milvus collections initialized")
@@ -65,9 +72,11 @@ class MilvusStore:
     # ------------------------------------------------------------------
 
     def insert_slang(self, slang: str, meaning: str, embedding: list[float], category: str = ""):
+        self._connect()
         self.slang_col.insert([[slang], [meaning], [category], [embedding]])
 
     def search_similar_slang(self, embedding: list[float], top_k: int = 5):
+        self._connect()
         self.slang_col.load()
         results = self.slang_col.search(
             data=[embedding],
@@ -91,9 +100,11 @@ class MilvusStore:
     # ------------------------------------------------------------------
 
     def insert_intel(self, raw_data_id: int, text_hash: str, embedding: list[float]):
+        self._connect()
         self.intel_col.insert([[raw_data_id], [text_hash], [embedding]])
 
     def search_similar_intel(self, embedding: list[float], top_k: int = 10):
+        self._connect()
         self.intel_col.load()
         results = self.intel_col.search(
             data=[embedding],
@@ -113,6 +124,7 @@ class MilvusStore:
 
     def insert_slang_batch(self, items: list[tuple[str, str, list[float], str]]):
         """items: list of (slang, meaning, embedding, category)."""
+        self._connect()
         if not items:
             return
         slangs, meanings, cats, embs = [], [], [], []
@@ -124,6 +136,7 @@ class MilvusStore:
         self.slang_col.insert([slangs, meanings, cats, embs])
 
     def flush(self):
+        self._connect()
         self.slang_col.flush()
         self.intel_col.flush()
 
