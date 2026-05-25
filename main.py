@@ -63,7 +63,10 @@ def _load_seed_slang():
 @cli.command()
 @click.option("--platform", "-p", default="telegram", help="Platform to collect from")
 @click.option("--tg-groups", default="", help="Comma-separated Telegram group usernames")
-def collect(platform: str, tg_groups: str):
+@click.option("--keywords", "-k", default="", help="Comma-separated search keywords (for weibo/tieba)")
+@click.option("--max-pages", default=3, help="Max pages per keyword (for search-based collectors)")
+@click.option("--fetch-replies/--no-fetch-replies", default=True, help="Fetch post replies (tieba)")
+def collect(platform: str, tg_groups: str, keywords: str, max_pages: int, fetch_replies: bool):
     """Run data collectors."""
     from collectors.registry import get_collector
     from storage.mysql_store import mysql
@@ -72,8 +75,15 @@ def collect(platform: str, tg_groups: str):
     kwargs = {}
     if platform == "telegram" and tg_groups:
         kwargs["group_usernames"] = [g.strip() for g in tg_groups.split(",")]
-    elif platform in ("tieba", "zhihu", "forum"):
-        kwargs["urls"] = tg_groups.split(",") if tg_groups else []
+    elif platform == "weibo" and keywords:
+        kwargs["keywords"] = [k.strip() for k in keywords.split(",")]
+        kwargs["max_pages_per_keyword"] = max_pages
+    elif platform in ("tieba", "zhihu") and keywords:
+        kwargs["keywords"] = [k.strip() for k in keywords.split(",")]
+        kwargs["max_pages_per_keyword"] = max_pages
+        kwargs["fetch_replies"] = fetch_replies
+    elif platform in ("xiaohongshu", "forum"):
+        kwargs["urls"] = keywords.split(",") if keywords else (tg_groups.split(",") if tg_groups else [])
 
     collector = get_collector(platform, **kwargs)
     count = 0

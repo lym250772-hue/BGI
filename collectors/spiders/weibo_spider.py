@@ -12,12 +12,28 @@ import time
 import re
 import os
 import json
+import random
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from loguru import logger
 from playwright.sync_api import sync_playwright, Browser, Page
 
 from config.settings import settings
+
+
+# ── User-Agent 池 ──────────────────────────────────────────────────────────────
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+]
+
+
+def random_ua() -> str:
+    return random.choice(USER_AGENTS)
 
 
 # ── 解析结果结构 ──────────────────────────────────────────────────────────────
@@ -66,6 +82,32 @@ class WeiboSearchSpider:
             settings.raw_data_dir.as_posix(), "weibo_cookies.json"
         )
 
+    @staticmethod
+    def _load_cookies(platform: str) -> list[dict] | None:
+        """加载平台 Cookie：优先环境变量 BGI_{PLATFORM}_COOKIES，文件兜底。"""
+        # 1. 从环境变量读取（JSON 字符串）
+        env_val = getattr(settings, f"{platform}_cookies", "")
+        if env_val:
+            try:
+                cookies = json.loads(env_val)
+                if isinstance(cookies, list) and cookies:
+                    return cookies
+            except json.JSONDecodeError:
+                pass
+        # 2. 从文件兜底
+        cookie_file = os.path.join(
+            settings.raw_data_dir.as_posix(), f"{platform}_cookies.json"
+        )
+        if os.path.exists(cookie_file):
+            try:
+                with open(cookie_file, "r", encoding="utf-8") as f:
+                    cookies = json.load(f)
+                if isinstance(cookies, list) and cookies:
+                    return cookies
+            except Exception:
+                pass
+        return None
+
     # ── 生命周期 ──────────────────────────────────────────────────────────
 
     def start(self):
@@ -75,14 +117,11 @@ class WeiboSearchSpider:
             headless=self.headless,
             args=[
                 "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
             ],
         )
         self._context = self._browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
+            user_agent=random_ua(),
             locale="zh-CN",
         )
 
@@ -95,18 +134,17 @@ class WeiboSearchSpider:
             logger.warning("预热访问 weibo.com 超时，继续...")
         temp_page.close()
 
-        # 注入 Cookie
-        if os.path.exists(self._cookie_file):
+        # 注入 Cookie（优先环境变量，文件兜底）
+        cookies = self._load_cookies("weibo")
+        if cookies:
             try:
-                with open(self._cookie_file, "r", encoding="utf-8") as f:
-                    cookies = json.load(f)
                 self._context.add_cookies(cookies)
                 self._logged_in = True
                 logger.info(f"已注入 {len(cookies)} 条微博 Cookie")
             except Exception as exc:
                 logger.warning(f"Cookie 注入失败: {exc}")
         else:
-            logger.warning("未找到 Cookie 文件，将使用未登录模式（搜索可能被拦截）")
+            logger.warning("未配置微博 Cookie（环境变量 BGI_WEIBO_COOKIES 或文件），搜索可能被拦截")
 
         self._page = self._context.new_page()
         self._page.add_init_script("""
