@@ -1,0 +1,64 @@
+{
+  "platform": "tieba",
+  "keyword": "刷单",
+  "count": 4,
+  "note": "贴吧短时间内多次请求会触发百度安全验证，采集需控制频率（建议间隔 > 5分钟）",
+  "items": [
+    {
+      "platform": "tieba",
+      "bar_name": "西安电子科技大学吧",
+      "author_username": "💕米库やしい²💕",
+      "content_raw": "食堂这么多刷单的是何意味啊",
+      "source_url": "https://tieba.baidu.com/p/10707694275",
+      "thread_id": "10707694275",
+      "reply_count": 48,
+      "collected_at": "2026-05-11T00:00:00",
+      "keyword": "刷单",
+      "has_emoji": false,
+      "has_image": true,
+      "replies_sample": []
+    },
+    {
+      "platform": "tieba",
+      "bar_name": "孙笑川吧",
+      "author_username": "贴吧阿Sir",
+      "content_raw": "《百度贴吧关于整治不良网络生态的公告》",
+      "source_url": "https://tieba.baidu.com/p/10266810557",
+      "thread_id": "10266810557",
+      "reply_count": 118,
+      "collected_at": "2025-12-03T00:00:00",
+      "keyword": "刷单",
+      "has_emoji": false,
+      "has_image": false,
+      "replies_sample": []
+    },
+    {
+      "platform": "tieba",
+      "bar_name": "斯慕避难所吧",
+      "author_username": "影宇残",
+      "content_raw": "友友们，这种是电商在刷单吗",
+      "source_url": "https://tieba.baidu.com/p/10328695944",
+      "thread_id": "10328695944",
+      "reply_count": 77,
+      "collected_at": "2025-12-23T00:00:00",
+      "keyword": "刷单",
+      "has_emoji": false,
+      "has_image": true,
+      "replies_sample": []
+    },
+    {
+      "platform": "tieba",
+      "bar_name": "第五人格交易吧",
+      "author_username": "麦麦(摆烂版)",
+      "content_raw": "提醒一下大家 刷单是违法行为",
+      "source_url": "https://tieba.baidu.com/p/10411332359",
+      "thread_id": "10411332359",
+      "reply_count": 2,
+      "collected_at": "2026-01-19T00:00:00",
+      "keyword": "刷单",
+      "has_emoji": false,
+      "has_image": true,
+      "replies_sample": []
+    }
+  ]
+}
