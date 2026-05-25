@@ -88,6 +88,9 @@ python main.py collect --platform telegram --tg-groups "group1,group2"
 ```bash
 python main.py init-db                   # 初始化所有数据库
 python main.py collect -p telegram       # 采集情报
+python main.py collect -p tieba -k "刷单,接码" --max-pages 3    # 贴吧搜索采集
+python main.py collect -p zhihu -k "刷单,接码" --max-pages 2    # 知乎搜索采集
+python main.py collect -p weibo -k "刷单" --max-pages 1          # 微博搜索采集
 python main.py clean -l 500              # 清洗去重
 python main.py analyze -l 200            # 分类 + 实体抽取
 python main.py run -l 500                # 全流程：collect → clean → analyze
@@ -108,10 +111,14 @@ BGI/
 │   ├── telegram_collector.py#   Telegram 采集器 (Telethon)
 │   ├── web_collector.py     #   Web 采集器 (Scrapy/Playwright)
 │   ├── weibo_collector.py   #   微博搜索采集器 (Playwright)
+│   ├── tieba_collector.py   #   贴吧搜索采集器 (Playwright)
+│   ├── zhihu_collector.py   #   知乎搜索采集器 (Playwright)
 │   ├── registry.py          #   采集器注册表
 │   └── spiders/             #   平台爬虫实现
-│       ├── __init__.py      #   导出 WeiboSearchSpider
-│       └── weibo_spider.py  #   微博关键词搜索 Spider
+│       ├── __init__.py      #   统一导出 Spider 类
+│       ├── weibo_spider.py  #   微博关键词搜索 Spider
+│       ├── tieba_spider.py  #   贴吧关键词搜索 Spider
+│       └── zhihu_spider.py  #   知乎关键词搜索 Spider
 │
 ├── cleaner/                 # 数据清洗层
 │   ├── pipeline.py          #   清洗管道 (HTML→去噪→SimHash→优先级)
@@ -150,11 +157,14 @@ BGI/
 │   └── slang_dict/          #   黑话种子数据 (49条)
 │       └── seed_slang.json
 │
-├── tests/                   # 单元测试 (28 tests)
+├── tests/                   # 单元测试 & 采集集成测试
 │   ├── test_cleaner.py      #   清洗管道测试
 │   ├── test_classifier.py   #   分类器测试
 │   ├── test_entity_extractor.py  # 实体抽取测试
-│   └── test_weibo_search.py #   微博搜索采集测试
+│   ├── test_defanger.py     #   安全去激活测试
+│   ├── test_weibo_search.py #   微博搜索采集测试
+│   ├── test_tieba_search.py #   贴吧搜索采集测试
+│   └── test_zhihu_search.py #   知乎搜索采集测试
 │
 ├── scripts/                 # 工具脚本（预留）
 └── config/                  # 全局配置
@@ -165,16 +175,28 @@ BGI/
 
 | 文件 | 作用 |
 |------|------|
-| `*/__init__.py` | Python 包标识。部分含模块导入（analyzer），部分仅占位（api/storage 为懒加载设计） |
+| `*/__init__.py` | Python 包标识。部分含模块导入（analyzer/collectors），部分仅占位（api/storage 为懒加载设计） |
 | `scripts/` | 工具脚本目录，预留给数据迁移、模型训练等辅助任务 |
 | `data/raw/` | 原始采集数据存储目录 |
 | `data/cleaned/` | 清洗后数据存储目录 |
 | `data/models/` | 微调模型文件存放目录（RoBERTa checkpoint） |
 
+### 多源采集状态
+
+| 平台 | 优先级 | 状态 | 采集量/页 | 技术要点 |
+|------|--------|:----:|:---------:|------|
+| 贴吧 | P0 | ✅ | 4~50条 | Playwright + BDUSS Cookie + Referer 绕过 |
+| 知乎 | P0 | ✅ | 10条 | JS Cookie 注入 + DOM 解析 SearchResult-Card |
+| 微博 | P1 | ✅ | 20条 | Cookie 登录 + UA 池轮换 |
+| Telegram | P1 | ⚠️ | - | 需配置 API ID/Hash |
+| 小红书 | P1 | ⬜ | - | 待实现 |
+| 抖音 | P2 | ⬜ | - | 待研究 |
+| 垂直站点 | P2 | ⬜ | - | 待实现 |
+
 ## 运行测试
 
 ```bash
-python -m pytest tests/ -v    # 27 tests, all passing
+python -m pytest tests/ -v    # 37 tests, all passing
 ```
 
 ## 许可证
