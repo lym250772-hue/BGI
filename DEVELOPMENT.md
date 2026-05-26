@@ -1,5 +1,54 @@
 # BGI 开发指南
 
+## v0.6 更新（2026-05-25）
+
+| 模块 | 变更 |
+|------|------|
+| 贴吧 Spider | 新增 `collectors/spiders/tieba_spider.py` — Playwright 贴吧关键词搜索 Spider，Cookie 登录、Referer 绕过、搜索结果+帖子详情+回复采集 |
+| 贴吧采集器 | 新增 `collectors/tieba_collector.py` — 实现 BaseCollector 接口，将 ParsedTiebaItem 转换为 IntelItem |
+| 知乎 Spider | 新增 `collectors/spiders/zhihu_spider.py` — Playwright + JS Cookie 注入 + DOM 解析搜索 Spider，支持回答/评论采集 |
+| 知乎采集器 | 新增 `collectors/zhihu_collector.py` — 实现 BaseCollector 接口 |
+| 微博反爬增强 | `weibo_spider.py` 新增 UA 池（5个随机轮换）、Cookie 统一 `_load_cookies()` 管理、`--no-sandbox` 参数 |
+| Cookie 管理 | `.env.template` 新增 BGI_WEIBO/TIEBA/ZHIHU_COOKIES 配置模板，settings.py 新增对应字段 |
+| CLI 扩展 | `main.py` collect 命令新增 `--keywords/-k`、`--max-pages`、`--fetch-replies/--no-fetch-replies` 参数 |
+| 采集注册 | `registry.py` 贴吧/知乎改为专用采集器（替换 WebCollector stub） |
+| 采集测试 | 新增 `test_tieba_search.py` / `test_zhihu_search.py`，三平台端到端测试验证通过 |
+| 三平台反爬对齐 | UA 池 + webdriver 隐藏 + Cookie 注入 + 随机间隔 + 首页预热 + 验证码检测，6 项策略三平台统一 |
+
+### 三平台采集测试结果（2026-05-25 实测）
+
+| 平台 | 采集量/页 | 数据质量 |
+|------|:---------:|------|
+| 贴吧 | 4~50条 | 帖吧名、用户名、回复数、正文、表情检测、图片检测 |
+| 知乎 | 10条 | 问题+摘要+完整回答（含赞数/评论数）、话题标签 |
+| 微博 | 20条 | 用户名、UID、时间、内容类型、长文/图片/视频检测（字段最完整） |
+| Telegram | - | API ID/Hash 未配置，待补充 |
+
+### 反爬策略对照
+
+| 策略 | 贴吧 | 知乎 | 微博 |
+|------|:--:|:--:|:--:|
+| UA 池（5个） | ✅ | ✅ | ✅ |
+| webdriver 隐藏 | ✅ | ✅ | ✅ |
+| Cookie 注入 | ✅ BDUSS | ✅ JS(z_c0) | ✅ SUB |
+| 首页预热 | ✅ | ✅ | ✅ |
+| 请求间隔 | 1.5~5s | 3~6s | 2.5~5.5s |
+| 增量采集 | ✅ | ✅ | ✅ |
+| 验证码/重定向检测 | ✅ 标题检测 | ✅ | ✅ 重定向检测 |
+
+---
+
+## v0.5 更新（2026-05-23）
+
+| 模块 | 变更 |
+|------|------|
+| 微博采集 | 新增 `collectors/weibo_collector.py` — Playwright 微博关键词搜索采集器，支持 Cookie 登录、翻页、HTML 解析 |
+| Spider 模块 | 新增 `collectors/spiders/weibo_spider.py` — 通用微博搜索 Spider，可独立使用或通过 WeiboCollector 调用 |
+| Milvus 批量 | `milvus_store.py` 新增 `insert_slang_batch()` 方法，支持批量插入黑话向量 |
+| 采集注册 | `registry.py` 新增 weibo 平台注册，支持 `--keywords` 和 `--max-pages-per-keyword` 参数 |
+
+---
+
 ## v0.4 架构更新（2026-05-22）
 
 | 模块 | 变更 |
@@ -110,11 +159,18 @@ test: 添加分类器边界用例
 
 | 文件 | 说明 |
 |------|------|
-| `__init__.py` | 包标识（空文件） |
+| `__init__.py` | 导出 `BaseCollector` / `IntelItem` / `TelegramCollector` / `WebCollector` / `WeiboCollector` / `TiebaCollector` / `ZhihuCollector` |
 | `base.py` | `IntelItem` 数据类（12 个字段）+ `BaseCollector` 抽象基类 |
 | `telegram_collector.py` | Telethon 实现：遍历 TG 群消息，提取文本/图片/视频，计算 media hash |
 | `web_collector.py` | Scrapy + Playwright 实现：通用网页采集 |
-| `registry.py` | 平台 → 采集器工厂函数映射表 |
+| `weibo_collector.py` | Playwright 实现：微博关键词搜索采集器，支持 `keywords` / `max_pages_per_keyword` / `headless` 参数 |
+| `tieba_collector.py` | Playwright 实现：贴吧关键词搜索采集器，将 ParsedTiebaItem 转换为 IntelItem，回复数据序列化为 metadata.replies |
+| `zhihu_collector.py` | Playwright 实现：知乎关键词搜索采集器，将 ParsedZhihuItem 转换为 IntelItem，回答/评论数据序列化为 metadata |
+| `registry.py` | 平台 → 采集器工厂函数映射表（telegram / weibo / tieba / zhihu / xiaohongshu / forum） |
+| `spiders/__init__.py` | 导出 `WeiboSearchSpider` / `TiebaSpider` / `ZhihuSearchSpider` |
+| `spiders/weibo_spider.py` | 微博关键词搜索 Spider（Playwright）：UA 池轮换 / Cookie 注入登录 / HTML 卡片解析 / 结构化字段提取（ParsedWeiboItem） |
+| `spiders/tieba_spider.py` | 贴吧关键词搜索 Spider（Playwright）：BDUSS Cookie 登录 / Referer 绕过 / 搜索结果 + 帖子详情 + 回复采集 / 表情提取（ParsedTiebaItem + ParsedReply） |
+| `spiders/zhihu_spider.py` | 知乎关键词搜索 Spider（Playwright）：JS Cookie 注入 / reload / DOM 解析 SearchResult-Card / 回答 + 评论采集（ParsedZhihuItem + ParssedZhihuComment） |
 
 ### `cleaner/` —— 数据清洗层
 
@@ -182,6 +238,9 @@ test: 添加分类器边界用例
 | `test_classifier.py` | 分类器 7 个测试：账号交易/刷单/贷款/赌博关键词命中、未命中、级联策略、`skip_llm` 降级模式 |
 | `test_entity_extractor.py` | 实体抽取 8 个测试：手机号/微信/QQ/URL 正则提取、多实体、词典匹配、空文本、`extract_l1_l2_only` 降级方法 |
 | `test_defanger.py` | 安全去激活 8 个测试：URL/IP/Email 单独去激活、全文本混合去激活、幂等性验证、逆向还原、空输入边界 |
+| `test_weibo_search.py` | 微博搜索采集测试脚本：命令行直接运行，支持自定义关键词和翻页数，输出结构化解析结果 |
+| `test_tieba_search.py` | 贴吧搜索采集测试脚本：支持自定义关键词、翻页数、`--no-replies` 开关，输出帖子和回复内容预览 |
+| `test_zhihu_search.py` | 知乎搜索采集测试脚本：支持自定义关键词、翻页数、`--no-answers`（快速模式）、`--comments` 开关，输出问题和回答详情 |
 
 ### `data/` —— 数据目录
 

@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     collection_interval_minutes: int = 30
     max_requests_per_minute: int = 20
 
+    # --- Cookies (JSON strings for platform login, stored in .env) ---
+    weibo_cookies: str = ""
+    tieba_cookies: str = ""
+    zhihu_cookies: str = ""
+
     # --- Cleaning ---
     simhash_threshold: int = 3  # hamming distance <= 3 = duplicate
     dedup_similarity: float = 0.95
