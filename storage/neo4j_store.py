@@ -356,9 +356,9 @@ class Neo4jStore:
                     seen.add(eid)
 
                 edges.append({
-                    "from": iid if r.start_node.get("raw_id") else eid,
-                    "to": eid if r.start_node.get("raw_id") else iid,
-                    "label": type(r).__name__,
+                    "from": iid,
+                    "to": eid,
+                    "label": r.type,
                 })
 
         return nodes, edges

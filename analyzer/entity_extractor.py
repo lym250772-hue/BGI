@@ -200,8 +200,13 @@ class EntityExtractor:
                 "extraction_method": ExtractionMethod.LLM,
             })
         for acct in llm_result.get("accounts", []):
+            raw_type = acct.get("type", "wechat")
+            try:
+                etype = EntityType(raw_type)
+            except ValueError:
+                etype = EntityType.WECHAT
             entities.append({
-                "entity_type": acct.get("type", EntityType.WECHAT),
+                "entity_type": etype,
                 "entity_value": acct.get("value", ""),
                 "extraction_method": ExtractionMethod.LLM,
             })

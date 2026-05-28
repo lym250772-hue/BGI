@@ -13,11 +13,11 @@ def show():
     try:
         from storage.mysql_store import mysql
         with mysql.cursor() as c:
-            c.execute("SELECT entity_type, COUNT(*) as cnt FROM entities GROUP BY entity_type ORDER BY cnt DESC")
+            c.execute("SELECT entity_type, COUNT(*) as cnt FROM dwd_entity GROUP BY entity_type ORDER BY cnt DESC")
             stats = c.fetchall()
-            c.execute("SELECT COUNT(*) as total FROM entities")
+            c.execute("SELECT COUNT(*) as total FROM dwd_entity")
             total = c.fetchone()["total"]
-            c.execute("SELECT * FROM entities ORDER BY id DESC LIMIT 200")
+            c.execute("SELECT * FROM dwd_entity ORDER BY id DESC LIMIT 200")
             all_ents = c.fetchall()
     except Exception:
         stats, total, all_ents = [], 0, []

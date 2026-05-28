@@ -9,6 +9,8 @@ class MilvusStore:
 
     def __init__(self):
         self._connected = False
+        self._slang_col = None
+        self._intel_col = None
 
     def _connect(self):
         if self._connected:
@@ -26,15 +28,12 @@ class MilvusStore:
 
     def init_collections(self):
         self._connect()
-        self._init_slang_collection()
-        self._init_intel_collection()
+        _ = self.slang_col
+        _ = self.intel_col
         logger.info("Milvus collections initialized")
 
     def _init_slang_collection(self):
         name = "slang_embeddings"
-        if utility.has_collection(name):
-            self.slang_col = Collection(name)
-            return
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name="slang", dtype=DataType.VARCHAR, max_length=128),
@@ -43,17 +42,14 @@ class MilvusStore:
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=settings.milvus_dim),
         ]
         schema = CollectionSchema(fields, description="Slang dictionary embeddings")
-        self.slang_col = Collection(name, schema)
-        self.slang_col.create_index(
+        self._slang_col = Collection(name, schema)
+        self._slang_col.create_index(
             field_name="embedding",
             index_params={"metric_type": "COSINE", "index_type": "IVF_FLAT", "params": {"nlist": 128}},
         )
 
     def _init_intel_collection(self):
         name = "intel_embeddings"
-        if utility.has_collection(name):
-            self.intel_col = Collection(name)
-            return
         fields = [
             FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name="raw_data_id", dtype=DataType.INT64),
@@ -61,11 +57,30 @@ class MilvusStore:
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=settings.milvus_dim),
         ]
         schema = CollectionSchema(fields, description="Intel text embeddings")
-        self.intel_col = Collection(name, schema)
-        self.intel_col.create_index(
+        self._intel_col = Collection(name, schema)
+        self._intel_col.create_index(
             field_name="embedding",
             index_params={"metric_type": "COSINE", "index_type": "IVF_FLAT", "params": {"nlist": 128}},
         )
+    @property
+    def slang_col(self):
+        if self._slang_col is None:
+            name = "slang_embeddings"
+            if utility.has_collection(name):
+                self._slang_col = Collection(name)
+            else:
+                self._init_slang_collection()
+        return self._slang_col
+
+    @property
+    def intel_col(self):
+        if self._intel_col is None:
+            name = "intel_embeddings"
+            if utility.has_collection(name):
+                self._intel_col = Collection(name)
+            else:
+                self._init_intel_collection()
+        return self._intel_col
 
     # ------------------------------------------------------------------
     # Slang operations

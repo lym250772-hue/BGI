@@ -24,7 +24,8 @@ def _check_db():
         pass
     try:
         from storage.milvus_store import milvus
-        milvus.client.get_collection_stats("slang_embeddings")
+        from pymilvus import utility
+        utility.has_collection("slang_embeddings")
         status["Milvus"] = True
     except Exception:
         pass

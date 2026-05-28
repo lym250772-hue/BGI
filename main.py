@@ -8,19 +8,34 @@ Usage:
     python main.py analyze          # Run classification + entity extraction
     python main.py run              # Full pipeline: collect → clean → analyze
     python main.py ui               # Launch Streamlit dashboard
+    python main.py api              # Launch FastAPI server
 """
 import sys
 import click
 from loguru import logger
 
 logger.remove()
-logger.add(sys.stderr, level="INFO", format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}")
+logger.add(
+    sys.stderr, level="INFO",
+    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}",
+)
+
+
+# Status constants (aligned to PROJECT_PLAN.md ods_raw_intel.raw_status)
+STATUS_PENDING = "RAW_COLLECTED"
+STATUS_CLEANED = "CLEANED"
+STATUS_ANALYZED = "ANALYZED"
+STATUS_DISCARDED = "DISCARDED"
 
 
 @click.group()
 def cli():
     """BGI Intelligence Analysis Agent"""
 
+
+# ============================================================================
+# init-db
+# ============================================================================
 
 @cli.command()
 def init_db():
@@ -29,8 +44,16 @@ def init_db():
     from storage.neo4j_store import neo4j
     from storage.milvus_store import milvus
 
-    logger.info("Initializing MySQL...")
+    logger.info("Initializing MySQL (9-table ODS/DWD/DIM/ADS schema)...")
     mysql.init_tables()
+
+    logger.info("Migrating legacy data to new tables...")
+    stats = mysql.migrate_old_data()
+    for k, v in stats.items():
+        logger.info(f"  {k}: {v}")
+
+    logger.info("Normalizing status values to uppercase...")
+    _normalize_status()
 
     logger.info("Initializing Neo4j...")
     neo4j.init_constraints()
@@ -42,6 +65,24 @@ def init_db():
     _load_seed_slang()
 
     logger.info("All databases initialized!")
+
+
+def _normalize_status():
+    """Convert legacy lowercase statuses to PROJECT_PLAN uppercase format."""
+    from storage.mysql_store import mysql
+    mapping = {
+        "pending": STATUS_PENDING,
+        "cleaned": STATUS_CLEANED,
+        "analyzed": STATUS_ANALYZED,
+        "discarded": STATUS_DISCARDED,
+    }
+    with mysql.cursor() as c:
+        for old, new in mapping.items():
+            c.execute(
+                "UPDATE ods_raw_intel SET raw_status=%s WHERE raw_status=%s",
+                (new, old),
+            )
+        logger.info("Status values normalized")
 
 
 def _load_seed_slang():
@@ -60,17 +101,21 @@ def _load_seed_slang():
     logger.info(f"Loaded {len(slangs)} seed slang entries")
 
 
+# ============================================================================
+# collect
+# ============================================================================
+
 @cli.command()
 @click.option("--platform", "-p", default="telegram", help="Platform to collect from")
 @click.option("--tg-groups", default="", help="Comma-separated Telegram group usernames")
-@click.option("--keywords", "-k", default="", help="Comma-separated search keywords (for weibo/tieba)")
-@click.option("--max-pages", default=3, help="Max pages per keyword (for search-based collectors)")
-@click.option("--fetch-replies/--no-fetch-replies", default=True, help="Fetch post replies (tieba)")
+@click.option("--keywords", "-k", default="", help="Comma-separated search keywords")
+@click.option("--max-pages", default=3, help="Max pages per keyword")
+@click.option("--fetch-replies/--no-fetch-replies", default=True, help="Fetch post replies")
 def collect(platform: str, tg_groups: str, keywords: str, max_pages: int, fetch_replies: bool):
-    """Run data collectors."""
+    """Run data collectors and save to ods_raw_intel."""
     from collectors.registry import get_collector
     from storage.mysql_store import mysql
-    import hashlib
+    import json as _json
 
     kwargs = {}
     if platform == "telegram" and tg_groups:
@@ -91,19 +136,18 @@ def collect(platform: str, tg_groups: str, keywords: str, max_pages: int, fetch_
         mysql.insert_raw({
             "source_platform": item.platform,
             "source_url": item.source_url,
-            "author_uid": item.author_uid,
-            "author_username": item.author_username,
+            "author_id": item.author_uid,
+            "author_name": item.author_username,
             "content_type": item.content_type,
             "content_raw": item.content_raw,
-            "content": "",
-            "image_hash": item.image_hash,
-            "simhash": "",
-            "priority": "normal",
-            "status": "pending",
-            "collected_at": item.collected_at,
-            "group_id": item.group_id,
-            "message_id": item.message_id,
-            "metadata": json_dumps_safe(item.metadata),
+            "raw_status": STATUS_PENDING,
+            "collect_time": item.collected_at,
+            "metadata": _json.dumps(
+                {**item.metadata,
+                 "group_id": item.group_id,
+                 "message_id": item.message_id},
+                ensure_ascii=False, default=str,
+            ),
         })
         count += 1
         if count % 10 == 0:
@@ -111,61 +155,82 @@ def collect(platform: str, tg_groups: str, keywords: str, max_pages: int, fetch_
     logger.info(f"Collection complete: {count} items from {platform}")
 
 
+# ============================================================================
+# clean
+# ============================================================================
+
 @cli.command()
 @click.option("--limit", "-l", default=500, help="Max items to clean per run")
 def clean(limit: int):
-    """Run cleaning pipeline on pending raw data."""
+    """Run cleaning pipeline on raw intel."""
     from cleaner.pipeline import CleaningPipeline
     from storage.mysql_store import mysql
 
     pipeline = CleaningPipeline()
-    pending = mysql.list_raw(status="pending", limit=limit)
+    pending = mysql.list_raw(status=STATUS_PENDING, limit=limit)
 
     cleaned, discarded = 0, 0
     for item in pending:
-        result = pipeline.process(item["content_raw"])
+        text = item.get("content_raw", "")
+        result = pipeline.process(text)
         if result["should_discard"]:
-            mysql.update_raw_status(item["id"], "discarded", content=result["text"])
+            mysql.update_raw_status(item["id"], STATUS_DISCARDED,
+                                    clean_text=result["text"])
             discarded += 1
         else:
             mysql.update_raw_status(
-                item["id"], "cleaned",
-                content=result["text"],
+                item["id"], STATUS_CLEANED,
+                clean_text=result["text"],
                 simhash=result["simhash"],
             )
-            # Also update priority
-            sql = "UPDATE raw_data SET priority=%s WHERE id=%s"
-            with mysql.cursor() as c:
-                c.execute(sql, (result["priority"], item["id"]))
             cleaned += 1
+
+        if (cleaned + discarded) % 20 == 0:
+            logger.info(f"Cleaned {cleaned + discarded} items...")
 
     logger.info(f"Cleaning complete: {cleaned} kept, {discarded} discarded")
 
 
+# ============================================================================
+# analyze
+# ============================================================================
+
 @cli.command()
 @click.option("--limit", "-l", default=200, help="Max items to analyze per run")
 def analyze(limit: int):
-    """Run intent classification + entity extraction on cleaned data."""
+    """Run full analysis pipeline (classify + extract + evidence + score + report)."""
     from analyzer.engine import engine
     from storage.mysql_store import mysql
 
-    items = mysql.list_raw(status="cleaned", limit=limit)
+    items = mysql.list_raw(status=STATUS_CLEANED, limit=limit)
+    if not items:
+        logger.warning("No cleaned items found. Run 'python main.py clean' first.")
+        return
+
     analyzed = 0
     for item in items:
-        if not item.get("content"):
+        text = item.get("content_raw", "")
+        if not text or not text.strip():
             continue
         try:
             engine.run(
                 raw_data_id=item["id"],
-                text=item["content"],
-                platform=item["source_platform"],
+                text=text,
+                platform=item.get("source_platform", "unknown"),
             )
-            mysql.update_raw_status(item["id"], "analyzed")
+            # engine.run already updates status to ANALYZED via _persist_all
             analyzed += 1
+            if analyzed % 5 == 0:
+                logger.info(f"Analyzed {analyzed} items...")
         except Exception as exc:
             logger.error(f"Analysis failed for raw_id={item['id']}: {exc}")
+
     logger.info(f"Analysis complete: {analyzed} items")
 
+
+# ============================================================================
+# run — full pipeline
+# ============================================================================
 
 @cli.command()
 @click.option("--limit", "-l", default=500, help="Max items per stage")
@@ -182,6 +247,10 @@ def run(limit: int):
     logger.info("=== Pipeline complete ===")
 
 
+# ============================================================================
+# ui
+# ============================================================================
+
 @cli.command()
 def ui():
     """Launch Streamlit dashboard."""
@@ -191,11 +260,17 @@ def ui():
     subprocess.run(["streamlit", "run", str(app)])
 
 
-def json_dumps_safe(obj) -> str:
-    import json
-    def default(o):
-        return str(o)
-    return json.dumps(obj, ensure_ascii=False, default=default)
+# ============================================================================
+# api
+# ============================================================================
+
+@cli.command()
+@click.option("--host", default="0.0.0.0", help="Bind address")
+@click.option("--port", default=8000, help="Bind port")
+def api(host: str, port: int):
+    """Launch FastAPI server."""
+    import uvicorn
+    uvicorn.run("api.server:app", host=host, port=port, reload=True)
 
 
 if __name__ == "__main__":
