@@ -11,7 +11,7 @@ Endpoints:
     /internal/v1/agent/analyze         — Agent analysis (PROJECT_PLAN 8.1 contract)
 """
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Any
@@ -105,6 +105,16 @@ class SlangTermDTO(BaseModel):
     source: str = ""
 
 
+class NewSlangCandidateDTO(BaseModel):
+    term: str
+    suggested_meaning: str = ""
+    risk_category: str = ""
+    confidence: float = 0.0
+    evidence: str = ""
+    reason: str = ""
+    source: str = ""
+
+
 class AnalyzeResponse(BaseModel):
     raw_id: int
     clean_text: str = ""
@@ -115,6 +125,7 @@ class AnalyzeResponse(BaseModel):
     evidence_spans: list[dict] = []
     entities: list[dict] = []
     slang_terms: list[dict] = []
+    new_slang_candidates: list[dict] = []
     graph_result: dict = {}
     agent_summary: str = ""
     disposal_advice: list[dict] = []
@@ -153,18 +164,8 @@ def agent_analyze(req: AnalyzeRequest):
             platform=req.platform,
             enable_graph_expand=opts.enable_graph_expand,
             enable_report=opts.enable_report,
+            enable_llm=opts.enable_llm,
         )
-        # If LLM is disabled externally, force circuit open
-        if not opts.enable_llm and not engine.is_degraded:
-            engine._circuit_open = True
-            result = engine.run(
-                raw_data_id=req.raw_id,
-                text=req.text,
-                platform=req.platform,
-                enable_graph_expand=opts.enable_graph_expand,
-                enable_report=opts.enable_report,
-            )
-            engine.reset_circuit()
 
         return AnalyzeResponse(
             raw_id=result["raw_id"],
@@ -176,6 +177,7 @@ def agent_analyze(req: AnalyzeRequest):
             evidence_spans=result.get("evidence_spans", []),
             entities=result.get("entities", []),
             slang_terms=result.get("slang_terms", []),
+            new_slang_candidates=result.get("new_slang_candidates", []),
             graph_result=result.get("graph_result", {}),
             agent_summary=result.get("agent_summary", ""),
             disposal_advice=result.get("disposal_advice", []),
@@ -183,7 +185,87 @@ def agent_analyze(req: AnalyzeRequest):
         )
     except Exception as exc:
         logger.error(f"Agent analyze failed for raw_id={req.raw_id}: {exc}")
-        return AnalyzeResponse(raw_id=req.raw_id, clean_text=req.text)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent analyze failed for raw_id={req.raw_id}: {exc}",
+        ) from exc
+
+
+# ============================================================================
+# Routes — Async Analysis Jobs
+# ============================================================================
+
+class JobSubmitRequest(BaseModel):
+    raw_id: int
+    text: str
+    platform: str = "unknown"
+    options: Optional[AnalyzeOptions] = None
+
+
+class BatchJobRequest(BaseModel):
+    items: list[JobSubmitRequest]
+    platform: str = "unknown"
+
+
+@app.post("/api/analysis/jobs")
+def submit_job(req: JobSubmitRequest):
+    """Submit a single analysis job. Returns job_id for polling."""
+    try:
+        from storage.mysql_store import mysql
+        from analyzer.worker import submit_analysis
+
+        options = req.options.model_dump() if req.options else None
+        job_id = mysql.create_job(req.raw_id, req.text, req.platform, options=options)
+        submit_analysis(job_id, req.raw_id, req.text, req.platform, options=options)
+        return {"job_id": job_id, "status": "pending"}
+    except Exception as exc:
+        logger.error(f"Job submission failed: {exc}")
+        return {"error": str(exc)}
+
+
+@app.post("/api/analysis/jobs/batch")
+def submit_batch_jobs(req: BatchJobRequest):
+    """Submit multiple analysis jobs. Returns list of job_ids."""
+    try:
+        from analyzer.worker import batch_submit
+        items = [
+            {
+                "raw_id": it.raw_id,
+                "text": it.text,
+                "platform": it.platform or req.platform,
+                "options": it.options.model_dump() if it.options else None,
+            }
+            for it in req.items
+        ]
+        job_ids = batch_submit(items, req.platform)
+        return {"job_ids": job_ids, "count": len(job_ids)}
+    except Exception as exc:
+        logger.error(f"Batch job submission failed: {exc}")
+        return {"error": str(exc)}
+
+
+@app.get("/api/analysis/jobs/{job_id}")
+def get_job(job_id: str):
+    """Get job status and result. Poll this to track progress."""
+    try:
+        from analyzer.worker import get_job_status
+        job = get_job_status(job_id)
+        if not job:
+            return {"error": "Job not found"}
+        return dict(job)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/api/analysis/jobs")
+def list_jobs(status: Optional[str] = Query(default=None), limit: int = Query(default=50)):
+    """List recent analysis jobs."""
+    try:
+        from storage.mysql_store import mysql
+        jobs = mysql.list_jobs(status=status, limit=limit)
+        return {"total": len(jobs), "items": jobs}
+    except Exception as exc:
+        return {"total": 0, "items": [], "error": str(exc)}
 
 
 # ============================================================================
@@ -257,14 +339,15 @@ def get_intel_detail(raw_id: int):
     """Get full detail for a single intel item including analysis + entities."""
     try:
         from storage.mysql_store import mysql
-        rows = mysql.list_raw(limit=1, offset=raw_id - 1)
-        if not rows:
+        intel = mysql.get_raw_by_id(raw_id)
+        if not intel:
             return {"error": "Not found"}
-        intel = rows[0]
 
         with mysql.cursor() as c:
             c.execute(
-                "SELECT * FROM dwd_intel_analysis WHERE raw_id=%s ORDER BY created_at DESC LIMIT 1",
+                """SELECT * FROM dwd_intel_analysis
+                   WHERE raw_id=%s AND is_latest=1
+                   ORDER BY created_at DESC LIMIT 1""",
                 (raw_id,),
             )
             analysis = c.fetchone()
@@ -352,10 +435,60 @@ def list_slang(status: str = Query(default="active")):
     """List slang dictionary entries."""
     try:
         from storage.mysql_store import mysql
-        rows = mysql.list_slang(status=status)
+        rows = mysql.list_slang(status=None if status == "all" else status)
         return {"total": len(rows), "items": rows}
     except Exception as exc:
         return {"total": 0, "items": [], "error": str(exc)}
+
+
+class SlangCandidateReviewRequest(BaseModel):
+    term: str
+    meaning: str = ""
+    category: str = ""
+    reviewer: str = "analyst"
+    reason: str = ""
+
+
+@app.get("/api/slang/candidates")
+def list_slang_candidates(raw_id: Optional[int] = Query(default=None)):
+    """List pending model-discovered slang candidates."""
+    try:
+        from storage.mysql_store import mysql
+        rows = mysql.list_slang_candidates(raw_id=raw_id)
+        return {"total": len(rows), "items": rows}
+    except Exception as exc:
+        return {"total": 0, "items": [], "error": str(exc)}
+
+
+@app.post("/api/slang/candidates/approve")
+def approve_slang_candidate(req: SlangCandidateReviewRequest):
+    """Promote a pending slang candidate into the active dictionary."""
+    try:
+        from storage.mysql_store import mysql
+        ok = mysql.approve_slang_candidate(
+            term=req.term,
+            meaning=req.meaning,
+            category=req.category,
+            reviewer=req.reviewer,
+        )
+        return {"status": "ok" if ok else "not_found", "term": req.term}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+
+@app.post("/api/slang/candidates/reject")
+def reject_slang_candidate(req: SlangCandidateReviewRequest):
+    """Reject a pending slang candidate while keeping audit evidence."""
+    try:
+        from storage.mysql_store import mysql
+        ok = mysql.reject_slang_candidate(
+            term=req.term,
+            reviewer=req.reviewer,
+            reason=req.reason,
+        )
+        return {"status": "ok" if ok else "not_found", "term": req.term}
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
 
 
 @app.get("/api/cheat-scripts")
@@ -368,3 +501,59 @@ def list_cheat_scripts():
             return {"items": c.fetchall()}
     except Exception as exc:
         return {"items": [], "error": str(exc)}
+
+
+# ============================================================================
+# Routes — Annotations (HITL feedback loop)
+# ============================================================================
+
+class AnnotationRequest(BaseModel):
+    target_type: str          # "slang" | "classification" | "entity"
+    target_id: int            # raw_id for classification, entity_id for entity, 0 for slang
+    field_name: str           # corrected field (intent_label / entity_type / slang term)
+    old_value: str = ""
+    new_value: str
+    annotator: str = "human"
+    reason: str = ""
+
+
+@app.post("/api/annotations")
+def submit_annotation(req: AnnotationRequest):
+    """Submit a human correction. Auto-triggers the feedback loop:
+    - slang → updates dim_slang_dict
+    - classification → updates dwd_intel_analysis + generates training sample
+    - entity → updates dwd_entity
+    """
+    try:
+        from storage.mysql_store import mysql
+        result = mysql.log_annotation(
+            target_type=req.target_type,
+            target_id=req.target_id,
+            field_name=req.field_name,
+            old_value=req.old_value,
+            new_value=req.new_value,
+            annotator=req.annotator,
+            reason=req.reason,
+        )
+        return {"status": "ok", "result": result}
+    except Exception as exc:
+        logger.error(f"Annotation submission failed: {exc}")
+        return {"status": "error", "error": str(exc)}
+
+
+@app.get("/api/annotations")
+def list_annotations(synced: Optional[str] = Query(default=None)):
+    """List HITL annotations. ?synced=0 returns only pending corrections."""
+    try:
+        from storage.mysql_store import mysql
+        with mysql.cursor() as c:
+            if synced is not None:
+                c.execute(
+                    "SELECT * FROM annotation_log WHERE synced=%s ORDER BY created_at DESC LIMIT 100",
+                    (int(synced),),
+                )
+            else:
+                c.execute("SELECT * FROM annotation_log ORDER BY created_at DESC LIMIT 100")
+            return {"total": c.rowcount, "items": c.fetchall()}
+    except Exception as exc:
+        return {"total": 0, "items": [], "error": str(exc)}

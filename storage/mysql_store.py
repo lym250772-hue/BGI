@@ -14,6 +14,7 @@ Table layering:
 
 import json as _json
 import pymysql
+import threading
 from contextlib import contextmanager
 from loguru import logger
 from config.settings import settings
@@ -23,21 +24,37 @@ class MySQLStore:
     """Manages all MySQL CRUD operations."""
 
     def __init__(self):
-        self._conn = None
+        self._local = threading.local()
 
     @property
     def conn(self):
-        if self._conn is None or not self._conn.open:
-            self._conn = pymysql.connect(
+        conn = getattr(self._local, "conn", None)
+        if conn is not None and conn.open:
+            try:
+                conn.ping()
+            except Exception:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                conn = None
+                self._local.conn = None
+        if conn is None or not conn.open:
+            conn = pymysql.connect(
                 host=settings.mysql_host,
                 port=settings.mysql_port,
                 user=settings.mysql_user,
                 password=settings.mysql_password,
                 database=settings.mysql_database,
                 charset="utf8mb4",
+                connect_timeout=2,
+                read_timeout=5,
+                write_timeout=5,
+                autocommit=False,
                 cursorclass=pymysql.cursors.DictCursor,
             )
-        return self._conn
+            self._local.conn = conn
+        return conn
 
     @contextmanager
     def cursor(self):
@@ -46,7 +63,10 @@ class MySQLStore:
             yield c
             self.conn.commit()
         except Exception:
-            self.conn.rollback()
+            try:
+                self.conn.rollback()
+            except Exception:
+                self._local.conn = None
             raise
         finally:
             c.close()
@@ -114,12 +134,19 @@ class MySQLStore:
             classification_method VARCHAR(64),
             evidence_spans JSON,
             analysis_status VARCHAR(32) DEFAULT 'CLASSIFIED',
+            version INT DEFAULT 1,
+            is_latest TINYINT DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_raw(raw_id),
             INDEX idx_risk(risk_label, risk_sub_label),
-            INDEX idx_level(risk_level)
+            INDEX idx_level(risk_level),
+            INDEX idx_latest(raw_id, is_latest)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+        -- Add columns if table already exists (idempotent migration)
+        """
+
+        ddl2 = """
         -- DWD layer: extracted entities
         CREATE TABLE IF NOT EXISTS dwd_entity (
             id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -156,23 +183,26 @@ class MySQLStore:
 
         -- DIM layer: slang dictionary
         CREATE TABLE IF NOT EXISTS dim_slang_dict (
-            id BIGINT PRIMARY KEY AUTO_INCREMENT,
-            term VARCHAR(128) NOT NULL UNIQUE,
-            normalized_meaning TEXT NOT NULL,
-            risk_category VARCHAR(64),
-            examples JSON,
-            source VARCHAR(64),
-            confidence DECIMAL(5,4) DEFAULT 1.0,
-            status VARCHAR(32) DEFAULT 'active',
-            embedding_id VARCHAR(128),
-            created_by VARCHAR(64),
-            reviewed_by VARCHAR(64),
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+            term VARCHAR(128) NOT NULL UNIQUE COMMENT '黑话原词或候选词',
+            normalized_meaning TEXT NOT NULL COMMENT '标准释义；候选状态下为模型建议释义',
+            risk_category VARCHAR(64) COMMENT '关联风险分类',
+            examples JSON COMMENT '示例用法JSON数组',
+            source VARCHAR(64) COMMENT '来源：manual人工、seed种子、llm_candidate大模型发现、embedding_candidate向量发现',
+            confidence DECIMAL(5,4) DEFAULT 1.0 COMMENT '模型或人工确认置信度',
+            status VARCHAR(32) DEFAULT 'active' COMMENT '状态：active正式词典、candidate待审核、rejected已忽略',
+            embedding_id VARCHAR(128) COMMENT '关联Milvus向量主键',
+            candidate_raw_id BIGINT COMMENT '首次发现该候选黑话的原始情报ID',
+            candidate_evidence TEXT COMMENT '触发候选判断的原文证据片段',
+            candidate_reason TEXT COMMENT '模型判断为疑似黑话的原因',
+            created_by VARCHAR(64) COMMENT '创建人或系统来源',
+            reviewed_by VARCHAR(64) COMMENT '审核人',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
             INDEX idx_term(term),
             INDEX idx_category(risk_category),
             INDEX idx_status(status)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='黑灰产黑话词典与候选黑话池';
 
         -- ADS layer: gang / risk case
         CREATE TABLE IF NOT EXISTS ads_risk_case (
@@ -224,16 +254,211 @@ class MySQLStore:
             INDEX idx_target(target_type, target_id),
             INDEX idx_synced(synced)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+        -- LOG layer: async analysis job queue
+        CREATE TABLE IF NOT EXISTS analysis_job (
+            job_id VARCHAR(64) PRIMARY KEY,
+            raw_id BIGINT,
+            input_text MEDIUMTEXT NOT NULL,
+            platform VARCHAR(32) DEFAULT 'unknown',
+            status VARCHAR(16) DEFAULT 'pending',
+            progress INT DEFAULT 0,
+            current_step VARCHAR(64),
+            result_analysis_id BIGINT,
+            error_message TEXT,
+            options JSON,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            started_at DATETIME,
+            finished_at DATETIME,
+            INDEX idx_raw(raw_id),
+            INDEX idx_status(status),
+            INDEX idx_created(created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """
+
+        # Execute DDL block 1: ods_raw_intel, dwd_clean_intel, dwd_intel_analysis
         with self.cursor() as c:
             for stmt in ddl.split(";"):
-                # Strip comment lines and whitespace
                 lines = [l for l in stmt.split("\n")
                         if not l.strip().startswith("--")]
-                stmt = "\n".join(lines).strip()
-                if stmt:
-                    c.execute(stmt)
-        logger.info("MySQL tables initialized (9-table ODS/DWD/DIM/ADS schema)")
+                stmt_clean = "\n".join(lines).strip()
+                if stmt_clean:
+                    c.execute(stmt_clean)
+
+        # Idempotent migration: add version/is_latest if missing (table may pre-exist)
+        try:
+            with self.cursor() as c:
+                c.execute(
+                    "ALTER TABLE dwd_intel_analysis "
+                    "ADD COLUMN version INT DEFAULT 1, "
+                    "ADD COLUMN is_latest TINYINT DEFAULT 1"
+                )
+        except Exception:
+            pass
+
+        # Execute DDL block 2: dwd_entity, dim_slang_dict, ads, logs, jobs
+        with self.cursor() as c:
+            for stmt in ddl2.split(";"):
+                lines = [l for l in stmt.split("\n")
+                        if not l.strip().startswith("--")]
+                stmt_clean = "\n".join(lines).strip()
+                if stmt_clean:
+                    c.execute(stmt_clean)
+        self._ensure_schema_columns()
+        logger.info("MySQL tables initialized (10-table ODS/DWD/DIM/ADS schema)")
+
+    def _ensure_schema_columns(self):
+        """Add columns that may be missing in older local databases."""
+        migrations = [
+            ("annotation_log", "target_type", "ALTER TABLE annotation_log ADD COLUMN target_type VARCHAR(32) NOT NULL DEFAULT 'other' COMMENT '标注对象类型：slang、classification、entity'"),
+            ("annotation_log", "target_id", "ALTER TABLE annotation_log ADD COLUMN target_id BIGINT NOT NULL DEFAULT 0 COMMENT '标注对象ID'"),
+            ("annotation_log", "synced", "ALTER TABLE annotation_log ADD COLUMN synced TINYINT DEFAULT 0"),
+            ("agent_report", "training_sample", "ALTER TABLE agent_report ADD COLUMN training_sample JSON"),
+            ("dwd_intel_analysis", "version", "ALTER TABLE dwd_intel_analysis ADD COLUMN version INT DEFAULT 1"),
+            ("dwd_intel_analysis", "is_latest", "ALTER TABLE dwd_intel_analysis ADD COLUMN is_latest TINYINT DEFAULT 1"),
+            ("dim_slang_dict", "candidate_raw_id", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_raw_id BIGINT COMMENT '首次发现该候选黑话的原始情报ID'"),
+            ("dim_slang_dict", "candidate_evidence", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_evidence TEXT COMMENT '触发候选判断的原文证据片段'"),
+            ("dim_slang_dict", "candidate_reason", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_reason TEXT COMMENT '模型判断为疑似黑话的原因'"),
+        ]
+        with self.cursor() as c:
+            for table, column, sql in migrations:
+                c.execute(
+                    """SELECT COUNT(*) AS cnt
+                       FROM INFORMATION_SCHEMA.COLUMNS
+                       WHERE TABLE_SCHEMA=DATABASE()
+                         AND TABLE_NAME=%s
+                         AND COLUMN_NAME=%s""",
+                    (table, column),
+                )
+                if not c.fetchone()["cnt"]:
+                    c.execute(sql)
+            try:
+                c.execute(
+                    """UPDATE annotation_log
+                       SET target_id=COALESCE(NULLIF(target_id, 0), raw_data_id),
+                           target_type=COALESCE(NULLIF(target_type, ''), 'other')
+                       WHERE raw_data_id IS NOT NULL"""
+                )
+            except Exception as exc:
+                logger.debug(f"Annotation legacy backfill skipped: {exc}")
+            c.execute("ALTER TABLE dim_slang_dict COMMENT='黑灰产黑话词典与候选黑话池'")
+            comment_migrations = [
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN term VARCHAR(128) NOT NULL COMMENT '黑话原词或候选词'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN normalized_meaning TEXT NOT NULL COMMENT '标准释义；候选状态下为模型建议释义'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN risk_category VARCHAR(64) COMMENT '关联风险分类'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN examples JSON COMMENT '示例用法JSON数组'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN source VARCHAR(64) COMMENT '来源：manual人工、seed种子、llm_candidate大模型发现、embedding_candidate向量发现'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN confidence DECIMAL(5,4) DEFAULT 1.0 COMMENT '模型或人工确认置信度'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN status VARCHAR(32) DEFAULT 'active' COMMENT '状态：active正式词典、candidate待审核、rejected已忽略'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN embedding_id VARCHAR(128) COMMENT '关联Milvus向量主键'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN created_by VARCHAR(64) COMMENT '创建人或系统来源'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN reviewed_by VARCHAR(64) COMMENT '审核人'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'",
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'",
+            ]
+            for sql in comment_migrations:
+                try:
+                    c.execute(sql)
+                except Exception as exc:
+                    logger.debug(f"Column comment migration skipped: {exc}")
+        self._ensure_schema_comments()
+
+    def _ensure_schema_comments(self):
+        """Keep local MySQL schema readable in Chinese for demos and handoff."""
+        table_comments = [
+            ("ods_raw_intel", "原始情报表：保存采集或人工导入的原始文本与来源信息"),
+            ("dwd_clean_intel", "清洗情报表：保存去噪、OCR/ASR融合、去重后的文本"),
+            ("dwd_intel_analysis", "情报研判结果表：保存风险分类、证据片段和版本状态"),
+            ("dwd_entity", "结构化线索表：保存账号、联系方式、链接、黑话、工具等实体"),
+            ("dwd_entity_relation", "线索关系表：保存实体之间的共现和推断关系"),
+            ("dim_slang_dict", "黑灰产黑话词典与候选黑话池"),
+            ("ads_risk_case", "风险案件聚合表：保存团伙或案件级研判结果"),
+            ("agent_report", "Agent研判摘要表：保存摘要、证据、建议和图谱结果"),
+            ("annotation_log", "人工反馈日志表：保存人工修正和回流状态"),
+            ("analysis_job", "异步研判任务表：保存后台任务进度和结果索引"),
+        ]
+        column_comments = [
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT COMMENT '原始情报ID'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN source_platform VARCHAR(32) NOT NULL COMMENT '来源平台，如telegram、tieba、weibo'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN source_channel VARCHAR(128) COMMENT '来源频道、群组、贴吧或社区名称'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN source_url VARCHAR(1024) COMMENT '原始情报链接'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN source_keyword VARCHAR(128) COMMENT '采集命中的关键词'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN author_id VARCHAR(128) COMMENT '发布者账号ID'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN author_name VARCHAR(256) COMMENT '发布者昵称'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN publish_time DATETIME COMMENT '原始发布时间'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN collect_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '采集或导入时间'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN content_type VARCHAR(32) DEFAULT 'text' COMMENT '内容类型：text、image、video、audio'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN content_raw MEDIUMTEXT NOT NULL COMMENT '原始文本内容'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN media_urls JSON COMMENT '图片、音频、视频等媒体地址JSON'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN raw_status VARCHAR(32) DEFAULT 'RAW_COLLECTED' COMMENT '原始情报处理状态'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN metadata JSON COMMENT '采集侧附加元数据JSON'",
+
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT COMMENT '清洗记录ID'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN raw_id BIGINT NOT NULL COMMENT '关联原始情报ID'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN clean_text MEDIUMTEXT COMMENT '清洗后的正文'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN ocr_text MEDIUMTEXT COMMENT '图片OCR识别文本'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN asr_text MEDIUMTEXT COMMENT '音频ASR转写文本'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN merged_text MEDIUMTEXT COMMENT '融合后的最终研判文本'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN simhash VARCHAR(64) COMMENT 'SimHash指纹，用于近重复识别'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN noise_score DECIMAL(5,4) DEFAULT 0 COMMENT '噪声分数，越高越像无效内容'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN priority VARCHAR(16) DEFAULT 'normal' COMMENT '处理优先级'",
+            "ALTER TABLE dwd_clean_intel MODIFY COLUMN clean_status VARCHAR(32) DEFAULT 'CLEANED' COMMENT '清洗状态'",
+
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT COMMENT '研判结果ID'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN raw_id BIGINT NOT NULL COMMENT '关联原始情报ID'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN risk_label VARCHAR(64) COMMENT '风险大类'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN risk_sub_label VARCHAR(128) COMMENT '风险细分类型'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN risk_score DECIMAL(5,4) COMMENT '综合风险分，范围0到1'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN risk_level VARCHAR(16) COMMENT '风险等级：low、normal、high、critical'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN classification_method VARCHAR(64) COMMENT '分类来源：keyword、roberta、llm、degraded'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN evidence_spans JSON COMMENT '风险证据片段JSON'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN analysis_status VARCHAR(32) DEFAULT 'CLASSIFIED' COMMENT '研判状态'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN version INT DEFAULT 1 COMMENT '同一情报的研判版本号'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN is_latest TINYINT DEFAULT 1 COMMENT '是否为最新研判结果'",
+
+            "ALTER TABLE dwd_entity MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT COMMENT '线索ID'",
+            "ALTER TABLE dwd_entity MODIFY COLUMN raw_id BIGINT NOT NULL COMMENT '关联原始情报ID'",
+            "ALTER TABLE dwd_entity MODIFY COLUMN entity_type VARCHAR(64) NOT NULL COMMENT '线索类型，如wechat、phone、url、slang、tool'",
+            "ALTER TABLE dwd_entity MODIFY COLUMN entity_value TEXT NOT NULL COMMENT '线索原始值'",
+            "ALTER TABLE dwd_entity MODIFY COLUMN normalized_value TEXT COMMENT '归一化后的线索值'",
+            "ALTER TABLE dwd_entity MODIFY COLUMN extract_method VARCHAR(32) COMMENT '抽取方式：regex、dict、embedding、llm'",
+            "ALTER TABLE dwd_entity MODIFY COLUMN confidence DECIMAL(5,4) COMMENT '抽取置信度'",
+            "ALTER TABLE dwd_entity MODIFY COLUMN context TEXT COMMENT '命中线索附近上下文'",
+            "ALTER TABLE dwd_entity MODIFY COLUMN first_seen DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '首次发现时间'",
+
+            "ALTER TABLE annotation_log MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT COMMENT '标注记录ID'",
+            "ALTER TABLE annotation_log MODIFY COLUMN target_type VARCHAR(32) NOT NULL COMMENT '标注对象类型：slang、classification、entity'",
+            "ALTER TABLE annotation_log MODIFY COLUMN target_id BIGINT NOT NULL COMMENT '标注对象ID'",
+            "ALTER TABLE annotation_log MODIFY COLUMN field_name VARCHAR(64) NOT NULL COMMENT '被修正字段或黑话词条'",
+            "ALTER TABLE annotation_log MODIFY COLUMN old_value TEXT COMMENT '修正前内容'",
+            "ALTER TABLE annotation_log MODIFY COLUMN new_value TEXT COMMENT '修正后内容'",
+            "ALTER TABLE annotation_log MODIFY COLUMN annotator VARCHAR(64) COMMENT '标注人'",
+            "ALTER TABLE annotation_log MODIFY COLUMN reason VARCHAR(256) COMMENT '修正原因'",
+            "ALTER TABLE annotation_log MODIFY COLUMN synced TINYINT DEFAULT 0 COMMENT '是否已回流到词典或研判结果'",
+
+            "ALTER TABLE analysis_job MODIFY COLUMN job_id VARCHAR(64) NOT NULL COMMENT '异步任务ID'",
+            "ALTER TABLE analysis_job MODIFY COLUMN raw_id BIGINT COMMENT '关联原始情报ID'",
+            "ALTER TABLE analysis_job MODIFY COLUMN input_text MEDIUMTEXT NOT NULL COMMENT '任务输入文本'",
+            "ALTER TABLE analysis_job MODIFY COLUMN platform VARCHAR(32) DEFAULT 'unknown' COMMENT '来源平台'",
+            "ALTER TABLE analysis_job MODIFY COLUMN status VARCHAR(16) DEFAULT 'pending' COMMENT '任务状态：pending、running、success、failed'",
+            "ALTER TABLE analysis_job MODIFY COLUMN progress INT DEFAULT 0 COMMENT '任务进度百分比'",
+            "ALTER TABLE analysis_job MODIFY COLUMN current_step VARCHAR(64) COMMENT '当前执行步骤'",
+            "ALTER TABLE analysis_job MODIFY COLUMN result_analysis_id BIGINT COMMENT '成功后关联的研判结果ID'",
+            "ALTER TABLE analysis_job MODIFY COLUMN error_message TEXT COMMENT '失败原因'",
+            "ALTER TABLE analysis_job MODIFY COLUMN options JSON COMMENT '任务执行选项JSON'",
+        ]
+        with self.cursor() as c:
+            for table, comment in table_comments:
+                try:
+                    c.execute(f"ALTER TABLE {table} COMMENT=%s", (comment,))
+                except Exception as exc:
+                    logger.debug(f"Table comment migration skipped [{table}]: {exc}")
+            for sql in column_comments:
+                try:
+                    c.execute(sql)
+                except Exception as exc:
+                    logger.debug(f"Column comment migration skipped: {exc}")
 
     # ==================================================================
     # ODS: Raw Intelligence
@@ -251,17 +476,23 @@ class MySQLStore:
                 %(content_type)s, %(content_raw)s, %(media_urls)s, %(media_hash)s,
                 %(crawl_batch_id)s, %(raw_status)s, %(metadata)s)"""
         # Map old field names for backward compatibility
+        item.setdefault("source_platform", item.get("platform", "unknown"))
         item.setdefault("source_channel", item.get("source_channel"))
+        item.setdefault("source_url", item.get("source_url"))
         item.setdefault("source_keyword", item.get("source_keyword"))
         item.setdefault("author_id", item.get("author_uid"))
         item.setdefault("author_name", item.get("author_username"))
         item.setdefault("publish_time", item.get("publish_time") or item.get("collected_at"))
         item.setdefault("collect_time", item.get("collected_at"))
-        item.setdefault("media_urls", _json.dumps(item.get("media_urls", [])) if not isinstance(item.get("media_urls"), str) else item.get("media_urls"))
+        item.setdefault("content_type", "text")
+        item.setdefault("content_raw", item.get("content") or "")
+        media_urls = item.get("media_urls", [])
+        item["media_urls"] = media_urls if isinstance(media_urls, str) else _json.dumps(media_urls, ensure_ascii=False)
         item.setdefault("media_hash", item.get("image_hash"))
         item.setdefault("crawl_batch_id", item.get("crawl_batch_id"))
         item.setdefault("raw_status", item.get("status", "RAW_COLLECTED"))
-        item.setdefault("metadata", _json.dumps(item.get("metadata", {})) if not isinstance(item.get("metadata"), str) else item.get("metadata"))
+        metadata = item.get("metadata", {})
+        item["metadata"] = metadata if isinstance(metadata, str) else _json.dumps(metadata, ensure_ascii=False)
         with self.cursor() as c:
             c.execute(sql, item)
             return c.lastrowid
@@ -296,14 +527,47 @@ class MySQLStore:
             rows = c.fetchall()
             # Map field names for backward compat
             for r in rows:
-                r.setdefault("content", r.get("content_raw"))
-                r.setdefault("author_uid", r.get("author_id"))
-                r.setdefault("author_username", r.get("author_name"))
-                r.setdefault("platform", r.get("source_platform"))
-                r.setdefault("collected_at", r.get("collect_time"))
-                r.setdefault("status", r.get("raw_status"))
-                r.setdefault("image_hash", r.get("media_hash"))
+                self._normalize_raw_row(r)
             return rows
+
+    @staticmethod
+    def _normalize_raw_row(row: dict) -> dict:
+        row.setdefault("content", row.get("content_raw"))
+        row.setdefault("author_uid", row.get("author_id"))
+        row.setdefault("author_username", row.get("author_name"))
+        row.setdefault("platform", row.get("source_platform"))
+        row.setdefault("collected_at", row.get("collect_time"))
+        row.setdefault("status", row.get("raw_status"))
+        row.setdefault("image_hash", row.get("media_hash"))
+        return row
+
+    def get_raw_by_id(self, raw_id: int) -> dict | None:
+        """Return one raw intelligence row by primary key."""
+        with self.cursor() as c:
+            c.execute("SELECT * FROM ods_raw_intel WHERE id=%s", (raw_id,))
+            row = c.fetchone()
+            return self._normalize_raw_row(row) if row else None
+
+    def get_preferred_analysis_text(self, raw_id: int, fallback: str = "") -> str:
+        """Return the text that should be sent to the Agent.
+
+        Priority: merged_text > clean_text > content_raw/fallback.
+        """
+        with self.cursor() as c:
+            c.execute(
+                "SELECT merged_text, clean_text FROM dwd_clean_intel WHERE raw_id=%s",
+                (raw_id,),
+            )
+            clean = c.fetchone()
+            if clean:
+                text = clean.get("merged_text") or clean.get("clean_text")
+                if text:
+                    return text
+            c.execute("SELECT content_raw FROM ods_raw_intel WHERE id=%s", (raw_id,))
+            raw = c.fetchone()
+            if raw and raw.get("content_raw"):
+                return raw["content_raw"]
+            return fallback or ""
 
     def find_by_simhash(self, simhash: str, limit: int = 5) -> list[dict]:
         with self.cursor() as c:
@@ -350,13 +614,11 @@ class MySQLStore:
     # ==================================================================
 
     def insert_analysis(self, result: dict):
-        """Insert into dwd_intel_analysis."""
-        sql = """INSERT INTO dwd_intel_analysis
-            (raw_id, clean_id, risk_label, risk_sub_label, risk_score, risk_level,
-             classification_method, evidence_spans, analysis_status)
-        VALUES (%(raw_id)s, %(clean_id)s, %(risk_label)s, %(risk_sub_label)s,
-                %(risk_score)s, %(risk_level)s, %(classification_method)s,
-                %(evidence_spans)s, %(analysis_status)s)"""
+        """Insert into dwd_intel_analysis with version tracking.
+
+        If a previous analysis exists for this raw_id, marks it is_latest=0
+        and creates a new record with version=N+1, is_latest=1.
+        """
         result.setdefault("risk_label", result.get("intent_label"))
         result.setdefault("risk_sub_label", result.get("sub_label"))
         result.setdefault("risk_score", result.get("confidence", 0))
@@ -372,8 +634,49 @@ class MySQLStore:
                 result["evidence_spans"] = _json.dumps(val, ensure_ascii=False)
         else:
             result["evidence_spans"] = "[]"
+
+        raw_id = result["raw_id"]
+
         with self.cursor() as c:
+            # Find latest version for this raw_id
+            c.execute(
+                "SELECT MAX(version) as max_ver FROM dwd_intel_analysis WHERE raw_id=%s",
+                (raw_id,),
+            )
+            row = c.fetchone()
+            max_ver = row["max_ver"] if row and row["max_ver"] else 0
+            next_ver = max_ver + 1
+
+            # Mark old versions as not latest
+            if max_ver > 0:
+                c.execute(
+                    "UPDATE dwd_intel_analysis SET is_latest=0 WHERE raw_id=%s",
+                    (raw_id,),
+                )
+
+            # Insert new version
+            sql = """INSERT INTO dwd_intel_analysis
+                (raw_id, clean_id, risk_label, risk_sub_label, risk_score, risk_level,
+                 classification_method, evidence_spans, analysis_status,
+                 version, is_latest)
+            VALUES (%(raw_id)s, %(clean_id)s, %(risk_label)s, %(risk_sub_label)s,
+                    %(risk_score)s, %(risk_level)s, %(classification_method)s,
+                    %(evidence_spans)s, %(analysis_status)s,
+                    %(version)s, 1)"""
+            result["version"] = next_ver
             c.execute(sql, result)
+            analysis_id = c.lastrowid
+            logger.info(f"Analysis saved: raw_id={raw_id} version={next_ver}")
+            return analysis_id
+
+    def get_analysis_history(self, raw_id: int) -> list[dict]:
+        """Return all analysis versions for a raw_id, newest first."""
+        with self.cursor() as c:
+            c.execute(
+                "SELECT * FROM dwd_intel_analysis WHERE raw_id=%s ORDER BY version DESC",
+                (raw_id,),
+            )
+            return c.fetchall()
 
     def update_analysis(self, raw_id: int, **kwargs):
         """Update specific fields in dwd_intel_analysis."""
@@ -411,6 +714,12 @@ class MySQLStore:
         entity.setdefault("end_offset", entity.get("end", -1))
         with self.cursor() as c:
             c.execute(sql, entity)
+            return c.lastrowid
+
+    def delete_entities_for_raw(self, raw_id: int):
+        """Remove previous extracted entities for a raw item before re-analysis."""
+        with self.cursor() as c:
+            c.execute("DELETE FROM dwd_entity WHERE raw_id=%s", (raw_id,))
 
     def find_entity(self, entity_type: str, value: str) -> list[dict]:
         with self.cursor() as c:
@@ -461,9 +770,11 @@ class MySQLStore:
         """Insert or update dim_slang_dict."""
         sql = """INSERT INTO dim_slang_dict
             (term, normalized_meaning, risk_category, examples, source,
-             confidence, status, embedding_id, created_by, reviewed_by)
+             confidence, status, embedding_id, candidate_raw_id,
+             candidate_evidence, candidate_reason, created_by, reviewed_by)
         VALUES (%(term)s, %(normalized_meaning)s, %(risk_category)s, %(examples)s,
                 %(source)s, %(confidence)s, %(status)s, %(embedding_id)s,
+                %(candidate_raw_id)s, %(candidate_evidence)s, %(candidate_reason)s,
                 %(created_by)s, %(reviewed_by)s)
         ON DUPLICATE KEY UPDATE
             normalized_meaning=VALUES(normalized_meaning),
@@ -473,9 +784,12 @@ class MySQLStore:
             confidence=VALUES(confidence),
             status=VALUES(status),
             embedding_id=VALUES(embedding_id),
+            candidate_raw_id=VALUES(candidate_raw_id),
+            candidate_evidence=VALUES(candidate_evidence),
+            candidate_reason=VALUES(candidate_reason),
             reviewed_by=VALUES(reviewed_by)"""
         slang.setdefault("term", slang.get("slang"))
-        slang.setdefault("normalized_meaning", slang.get("normalized_meaning"))
+        slang.setdefault("normalized_meaning", slang.get("normalized_meaning") or "待人工确认")
         slang.setdefault("risk_category", slang.get("category"))
         slang.setdefault("examples", slang.get("examples",
             _json.dumps([], ensure_ascii=False)))
@@ -483,20 +797,116 @@ class MySQLStore:
         slang.setdefault("confidence", slang.get("confidence", 1.0))
         slang.setdefault("status", slang.get("status", "active"))
         slang.setdefault("embedding_id", slang.get("embedding_id"))
+        slang.setdefault("candidate_raw_id", slang.get("raw_id"))
+        slang.setdefault("candidate_evidence", slang.get("evidence"))
+        slang.setdefault("candidate_reason", slang.get("reason"))
         slang.setdefault("created_by", slang.get("created_by"))
         slang.setdefault("reviewed_by", slang.get("reviewed_by") or slang.get("confirmed_by"))
         with self.cursor() as c:
             c.execute(sql, slang)
 
-    def list_slang(self, status: str = "active") -> list[dict]:
+    def list_slang(self, status: str | None = "active") -> list[dict]:
         with self.cursor() as c:
-            c.execute("SELECT * FROM dim_slang_dict WHERE status=%s", (status,))
+            if status is None:
+                c.execute("SELECT * FROM dim_slang_dict ORDER BY updated_at DESC")
+            else:
+                c.execute(
+                    "SELECT * FROM dim_slang_dict WHERE status=%s ORDER BY updated_at DESC",
+                    (status,),
+                )
             rows = c.fetchall()
             for r in rows:
                 r.setdefault("slang", r.get("term"))
                 r.setdefault("category", r.get("risk_category"))
                 r.setdefault("normalized_meaning", r.get("normalized_meaning"))
             return rows
+
+    def upsert_slang_candidate(self, candidate: dict):
+        """Persist a model-discovered slang candidate for human review."""
+        term = (candidate.get("term") or candidate.get("slang") or "").strip()
+        if not term:
+            return None
+        with self.cursor() as c:
+            c.execute(
+                "SELECT status FROM dim_slang_dict WHERE term=%s LIMIT 1",
+                (term,),
+            )
+            existing = c.fetchone()
+        if existing and existing.get("status") == "active":
+            return None
+
+        self.insert_slang({
+            "term": term,
+            "normalized_meaning": candidate.get("suggested_meaning")
+                                  or candidate.get("normalized_meaning")
+                                  or "待人工确认",
+            "risk_category": candidate.get("risk_category"),
+            "examples": _json.dumps([candidate.get("evidence", "")], ensure_ascii=False),
+            "source": candidate.get("source", "llm_candidate"),
+            "confidence": candidate.get("confidence", 0.5),
+            "status": "candidate",
+            "candidate_raw_id": candidate.get("raw_id"),
+            "candidate_evidence": candidate.get("evidence"),
+            "candidate_reason": candidate.get("reason"),
+            "created_by": "agent",
+        })
+        return term
+
+    def list_slang_candidates(self, raw_id: int = None, limit: int = 100) -> list[dict]:
+        """List pending slang candidates. Optionally filter by raw intel ID."""
+        with self.cursor() as c:
+            if raw_id is None:
+                c.execute(
+                    """SELECT * FROM dim_slang_dict
+                       WHERE status='candidate'
+                       ORDER BY updated_at DESC LIMIT %s""",
+                    (limit,),
+                )
+            else:
+                c.execute(
+                    """SELECT * FROM dim_slang_dict
+                       WHERE status='candidate' AND candidate_raw_id=%s
+                       ORDER BY updated_at DESC LIMIT %s""",
+                    (raw_id, limit),
+                )
+            rows = c.fetchall()
+        for row in rows:
+            row.setdefault("term", row.get("slang"))
+            row.setdefault("suggested_meaning", row.get("normalized_meaning"))
+            row.setdefault("evidence", row.get("candidate_evidence"))
+            row.setdefault("reason", row.get("candidate_reason"))
+        return rows
+
+    def approve_slang_candidate(self, term: str, meaning: str = None,
+                                category: str = None, reviewer: str = "analyst") -> bool:
+        """Promote a candidate slang term into the active dictionary."""
+        with self.cursor() as c:
+            c.execute(
+                """UPDATE dim_slang_dict
+                   SET status='active',
+                       normalized_meaning=COALESCE(NULLIF(%s, ''), normalized_meaning),
+                       risk_category=COALESCE(NULLIF(%s, ''), risk_category),
+                       reviewed_by=%s,
+                       updated_at=NOW()
+                   WHERE term=%s""",
+                (meaning or "", category or "", reviewer, term),
+            )
+            return c.rowcount > 0
+
+    def reject_slang_candidate(self, term: str, reviewer: str = "analyst",
+                               reason: str = None) -> bool:
+        """Mark a candidate slang term as rejected without deleting audit evidence."""
+        with self.cursor() as c:
+            c.execute(
+                """UPDATE dim_slang_dict
+                   SET status='rejected',
+                       reviewed_by=%s,
+                       candidate_reason=COALESCE(NULLIF(%s, ''), candidate_reason),
+                       updated_at=NOW()
+                   WHERE term=%s AND status='candidate'""",
+                (reviewer, reason or "", term),
+            )
+            return c.rowcount > 0
 
     # ==================================================================
     # ADS: Risk Case
@@ -570,14 +980,51 @@ class MySQLStore:
 
     def log_annotation(self, target_type: str, target_id: int, field_name: str,
                        old_value: str, new_value: str, annotator: str = None,
-                       reason: str = None):
-        """Record a human correction."""
+                       reason: str = None) -> dict:
+        """Record a human correction and auto-trigger the feedback loop.
+
+        Returns dict with annotation_id and sync status.
+        - slang corrections → updates dim_slang_dict + marks synced
+        - classification corrections → updates dwd_intel_analysis + generates training sample
+        - entity corrections → updates dwd_entity
+        """
         sql = """INSERT INTO annotation_log
             (target_type, target_id, field_name, old_value, new_value, annotator, reason)
         VALUES (%s, %s, %s, %s, %s, %s, %s)"""
         with self.cursor() as c:
             c.execute(sql, (target_type, target_id, field_name, old_value, new_value,
                           annotator, reason))
+            annotation_id = c.lastrowid
+
+        result = {"annotation_id": annotation_id, "target_type": target_type, "synced": False}
+
+        try:
+            if target_type == "slang":
+                result["synced"] = self.sync_slang_correction(
+                    slang=field_name,  # field_name carries the slang term
+                    normalized_meaning=new_value,
+                    corrected_by=annotator,
+                )
+            elif target_type == "classification":
+                result["synced"] = self.sync_classification_correction(
+                    raw_data_id=target_id,
+                    intent_label=field_name,  # field_name carries the intent_label
+                    sub_label=new_value or "",
+                    corrected_by=annotator,
+                )
+                self._generate_training_sample(target_id, field_name, new_value)
+            elif target_type == "entity":
+                result["synced"] = self.sync_entity_correction(
+                    entity_id=target_id,
+                    field_name=field_name,
+                    new_value=new_value,
+                    corrected_by=annotator,
+                )
+        except Exception as exc:
+            logger.warning(f"HITL auto-sync failed for {target_type}: {exc}")
+            result["sync_error"] = str(exc)
+
+        return result
 
     def get_pending_annotations(self) -> list[dict]:
         with self.cursor() as c:
@@ -602,9 +1049,9 @@ class MySQLStore:
         with self.cursor() as c:
             c.execute(
                 """UPDATE annotation_log SET synced=1
-                   WHERE target_type='slang' AND field_name='normalized_meaning'
-                   AND new_value=%s AND synced=0""",
-                (normalized_meaning,),
+                   WHERE target_type='slang' AND synced=0
+                   AND field_name=%s""",
+                (slang,),
             )
         logger.info(f"HITL slang correction synced: '{slang}' -> '{normalized_meaning}'")
         return True
@@ -616,7 +1063,7 @@ class MySQLStore:
             c.execute(
                 """UPDATE dwd_intel_analysis
                    SET risk_label=%s, risk_sub_label=%s, classification_method='manual'
-                   WHERE raw_id=%s""",
+                   WHERE raw_id=%s AND is_latest=1""",
                 (intent_label, sub_label, raw_data_id),
             )
             c.execute(
@@ -626,6 +1073,199 @@ class MySQLStore:
             )
         logger.info(f"HITL classification correction synced for raw_id={raw_data_id}")
         return True
+
+    def sync_entity_correction(self, entity_id: int, field_name: str,
+                               new_value: str, corrected_by: str = None) -> bool:
+        """Update dwd_entity and mark annotation as synced."""
+        with self.cursor() as c:
+            if field_name == "entity_type":
+                c.execute(
+                    "UPDATE dwd_entity SET entity_type=%s WHERE id=%s",
+                    (new_value, entity_id),
+                )
+            elif field_name == "entity_value":
+                c.execute(
+                    "UPDATE dwd_entity SET entity_value=%s, normalized_value=%s WHERE id=%s",
+                    (new_value, new_value, entity_id),
+                )
+            elif field_name == "confidence":
+                c.execute(
+                    "UPDATE dwd_entity SET confidence=%s WHERE id=%s",
+                    (float(new_value), entity_id),
+                )
+            else:
+                logger.warning(f"Unknown entity field: {field_name}")
+                return False
+            c.execute(
+                """UPDATE annotation_log SET synced=1
+                   WHERE target_type='entity' AND target_id=%s AND field_name=%s AND synced=0""",
+                (entity_id, field_name),
+            )
+        logger.info(f"HITL entity correction synced: entity_id={entity_id} {field_name}={new_value}")
+        return True
+
+    def _generate_training_sample(self, raw_id: int, intent_label: str, sub_label: str):
+        """Generate a training sample from a human-corrected classification.
+
+        Stores the sample in agent_report.training_sample (not dwd_intel_analysis,
+        which has no training_sample column).
+        """
+        try:
+            with self.cursor() as c:
+                c.execute(
+                    "SELECT clean_text, merged_text FROM dwd_clean_intel WHERE raw_id=%s",
+                    (raw_id,),
+                )
+                clean = c.fetchone()
+                text = (clean.get("merged_text") or clean.get("clean_text") or "") if clean else ""
+
+            if not text:
+                return
+
+            sample = _json.dumps({
+                "text": text[:2000],
+                "intent_label": intent_label,
+                "sub_label": sub_label,
+                "source": "manual",
+            }, ensure_ascii=False)
+
+            with self.cursor() as c:
+                c.execute(
+                    """INSERT INTO agent_report
+                        (raw_id, report_type, title, summary, training_sample)
+                    VALUES (%s, 'training_sample', 'HITL训练样本', '人工标注修正',
+                            %s)
+                    ON DUPLICATE KEY UPDATE training_sample=VALUES(training_sample)""",
+                    (raw_id, sample),
+                )
+            logger.info(f"Training sample generated for raw_id={raw_id}")
+        except Exception as exc:
+            logger.warning(f"Training sample generation failed for raw_id={raw_id}: {exc}")
+
+    # ==================================================================
+    # Analysis Job Queue (async task system)
+    # ==================================================================
+
+    def create_job(self, raw_id: int, input_text: str, platform: str = "unknown",
+                   options: dict = None) -> str:
+        """Create a new analysis job. Returns job_id (UUID)."""
+        import uuid
+        job_id = str(uuid.uuid4())[:12]
+        with self.cursor() as c:
+            c.execute(
+                """INSERT INTO analysis_job
+                    (job_id, raw_id, input_text, platform, status, progress, options)
+                VALUES (%s, %s, %s, %s, 'pending', 0, %s)""",
+                (job_id, raw_id, input_text, platform,
+                 _json.dumps(options) if options else None),
+            )
+        logger.debug(f"Job created: {job_id} for raw_id={raw_id}")
+        return job_id
+
+    def update_job_status(self, job_id: str, **kwargs):
+        """Update job fields: status, progress, current_step, result_analysis_id, error_message."""
+        allowed = {"status", "progress", "current_step", "result_analysis_id", "error_message"}
+        sets = []
+        params = []
+        for k, v in kwargs.items():
+            if k in allowed:
+                sets.append(f"{k}=%s")
+                params.append(v)
+        if not sets:
+            return
+        if kwargs.get("status") == "running" and "started_at" not in kwargs:
+            sets.append("started_at=NOW()")
+        if kwargs.get("status") in ("success", "failed"):
+            sets.append("finished_at=NOW()")
+        params.append(job_id)
+        with self.cursor() as c:
+            c.execute(f"UPDATE analysis_job SET {', '.join(sets)} WHERE job_id=%s", params)
+
+    def get_job(self, job_id: str) -> dict | None:
+        """Get a single job by ID."""
+        with self.cursor() as c:
+            c.execute("SELECT * FROM analysis_job WHERE job_id=%s", (job_id,))
+            return c.fetchone()
+
+    def get_analysis_bundle(self, raw_id: int) -> dict:
+        """Load the latest persisted analysis result in UI/API-friendly shape."""
+        with self.cursor() as c:
+            c.execute(
+                """SELECT * FROM dwd_intel_analysis
+                   WHERE raw_id=%s AND is_latest=1
+                   ORDER BY created_at DESC LIMIT 1""",
+                (raw_id,),
+            )
+            analysis = c.fetchone() or {}
+            c.execute(
+                "SELECT * FROM dwd_entity WHERE raw_id=%s ORDER BY id DESC",
+                (raw_id,),
+            )
+            entities = c.fetchall()
+            c.execute(
+                "SELECT * FROM agent_report WHERE raw_id=%s ORDER BY created_at DESC LIMIT 1",
+                (raw_id,),
+            )
+            report = c.fetchone() or {}
+
+        def _json_load(value, default):
+            if value is None:
+                return default
+            if isinstance(value, (dict, list)):
+                return value
+            try:
+                return _json.loads(value)
+            except Exception:
+                return default
+
+        return {
+            "raw_id": raw_id,
+            "clean_text": self.get_preferred_analysis_text(raw_id),
+            "risk_label": analysis.get("risk_label", ""),
+            "risk_sub_label": analysis.get("risk_sub_label", ""),
+            "risk_score": float(analysis.get("risk_score") or 0),
+            "risk_level": analysis.get("risk_level", "normal"),
+            "classification_method": analysis.get("classification_method", ""),
+            "evidence_spans": _json_load(analysis.get("evidence_spans"), []),
+            "entities": [
+                {
+                    "entity_type": e.get("entity_type"),
+                    "entity_value": e.get("entity_value"),
+                    "extraction_method": e.get("extract_method"),
+                    "confidence": float(e.get("confidence") or 0),
+                    "context": e.get("context") or "",
+                }
+                for e in entities
+            ],
+            "slang_terms": [
+                {
+                    "term": e.get("entity_value"),
+                    "meaning": e.get("context") or "",
+                    "source": e.get("extract_method") or "",
+                }
+                for e in entities
+                if e.get("entity_type") == "slang"
+            ],
+            "new_slang_candidates": self.list_slang_candidates(raw_id=raw_id),
+            "graph_result": _json_load(report.get("graph_json"), {}),
+            "agent_summary": report.get("summary", ""),
+            "disposal_advice": _json_load(report.get("disposal_advice"), []),
+        }
+
+    def list_jobs(self, status: str = None, limit: int = 50) -> list[dict]:
+        """List recent jobs, optionally filtered by status."""
+        with self.cursor() as c:
+            if status:
+                c.execute(
+                    "SELECT * FROM analysis_job WHERE status=%s ORDER BY created_at DESC LIMIT %s",
+                    (status, limit),
+                )
+            else:
+                c.execute(
+                    "SELECT * FROM analysis_job ORDER BY created_at DESC LIMIT %s",
+                    (limit,),
+                )
+            return c.fetchall()
 
     # ==================================================================
     # Stats for Dashboard
@@ -637,17 +1277,25 @@ class MySQLStore:
             today_count = c.fetchone()["cnt"]
             c.execute("SELECT COUNT(*) as cnt FROM ods_raw_intel WHERE raw_status IN ('RAW_COLLECTED','CLEANED')")
             pending_count = c.fetchone()["cnt"]
-            c.execute("SELECT COUNT(*) as cnt FROM dwd_intel_analysis WHERE risk_level IN ('high','critical')")
+            c.execute(
+                """SELECT COUNT(*) as cnt FROM dwd_intel_analysis
+                   WHERE is_latest=1 AND risk_level IN ('high','critical')"""
+            )
             high_risk_count = c.fetchone()["cnt"]
             c.execute("SELECT COUNT(*) as cnt FROM dwd_entity")
             entity_count = c.fetchone()["cnt"]
-            c.execute("SELECT risk_label, COUNT(*) as cnt FROM dwd_intel_analysis GROUP BY risk_label")
+            c.execute(
+                """SELECT risk_label, COUNT(*) as cnt
+                   FROM dwd_intel_analysis
+                   WHERE is_latest=1
+                   GROUP BY risk_label"""
+            )
             label_distribution = {r["risk_label"]: r["cnt"] for r in c.fetchall()}
             c.execute("""
                 SELECT r.id, r.content_raw, r.source_platform, r.collect_time,
                        a.risk_label, a.risk_level, a.risk_score
                 FROM ods_raw_intel r
-                LEFT JOIN dwd_intel_analysis a ON r.id = a.raw_id
+                LEFT JOIN dwd_intel_analysis a ON r.id = a.raw_id AND a.is_latest=1
                 WHERE r.raw_status != 'DISCARDED'
                 ORDER BY r.id DESC
                 LIMIT 10

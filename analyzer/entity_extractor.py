@@ -28,11 +28,14 @@ class EntityExtractor:
         EntityType.PHONE: re.compile(r"1[3-9]\d{9}"),
         EntityType.WECHAT: re.compile(r"(?:微信|wx|vx|VX|薇信|微)[：:\s]*([a-zA-Z][a-zA-Z0-9_-]{4,19})"),
         EntityType.QQ: re.compile(r"(?:QQ|qq|扣扣)[：:\s]*(\d{5,11})"),
+        EntityType.TELEGRAM: re.compile(r"(?:TG|Telegram|飞机|电报)[：:\s]*(@?[a-zA-Z][a-zA-Z0-9_]{4,31})"),
+        EntityType.EMAIL: re.compile(r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b"),
         EntityType.URL: re.compile(r"https?://[^\s]+|t\.me/[^\s]+|t\.cn/[^\s]+"),
         EntityType.DOMAIN: re.compile(r"(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}"),
         EntityType.IP: re.compile(r"(?:\d{1,3}\.){3}\d{1,3}"),
         EntityType.BANK_CARD: re.compile(r"\b(?:62|60|55|52|53|54|43|42|45|46|47|48|49)\d{14,18}\b"),
         EntityType.ALIPAY: re.compile(r"(?:支付宝|zfb)[：:\s]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|\d{11})"),
+        EntityType.CRYPTO_WALLET: re.compile(r"\b(?:T[a-zA-Z0-9]{33}|0x[a-fA-F0-9]{40})\b"),
     }
 
     def extract_regex(self, text: str) -> list[dict]:
@@ -53,12 +56,39 @@ class EntityExtractor:
     # L2: Known slang dictionary (zero LLM cost)
     # ------------------------------------------------------------------
 
+    # Entity types considered "high-value" — if enough of these are found by L1-L3,
+    # the L4 LLM step can be skipped
+    HIGH_VALUE_TYPES = {
+        EntityType.WECHAT, EntityType.QQ, EntityType.PHONE, EntityType.URL,
+        EntityType.DOMAIN, EntityType.BANK_CARD, EntityType.ALIPAY, EntityType.TELEGRAM,
+        EntityType.EMAIL, EntityType.CRYPTO_WALLET, EntityType.SLANG, EntityType.TOOL,
+    }
+
     def __init__(self):
         self._slang_dict: dict[str, str] = {}
+        self._load_slang_from_db()
 
-    def load_slang_dict(self, slang_map: dict[str, str]):
-        """Load known slang from MySQL slang_dict table or seed data."""
-        self._slang_dict = slang_map
+    def _load_slang_from_db(self):
+        """Load known slang terms from MySQL dim_slang_dict."""
+        try:
+            from storage.mysql_store import mysql
+            terms = mysql.list_slang("active")
+            self._slang_dict = {t.get("term", ""): t.get("normalized_meaning", "") for t in terms}
+            if self._slang_dict:
+                logger.info(f"Loaded {len(self._slang_dict)} slang terms from dict")
+        except Exception as exc:
+            logger.warning(f"Slang dict load failed: {exc}")
+
+    def refresh_slang_dict(self):
+        """Manually refresh the slang dictionary from database."""
+        self._slang_dict = {}
+        self._load_slang_from_db()
+        return len(self._slang_dict)
+
+    def load_slang_dict(self, slang_dict: dict[str, str]):
+        """Inject a slang dictionary, mainly for tests and offline demos."""
+        self._slang_dict = dict(slang_dict or {})
+        return len(self._slang_dict)
 
     def extract_dict(self, text: str) -> list[dict]:
         """L2: Exact-match known slang terms."""
@@ -165,8 +195,13 @@ class EntityExtractor:
     # Entry point
     # ------------------------------------------------------------------
 
-    def extract(self, text: str, embed_fn=None, intent_label: str = "") -> list[dict]:
-        """Run full extraction cascade. Returns list of entity dicts."""
+    def extract(self, text: str, embed_fn=None, intent_label: str = "",
+                classification_confidence: float = 0.0) -> list[dict]:
+        """Run full extraction cascade. Returns list of entity dicts.
+
+        Skips L4 LLM when L1-L3 have already found high-value entities with
+        sufficient classification confidence (>= 0.8), saving cost and latency.
+        """
         entities = []
 
         # L1: Regex
@@ -178,6 +213,30 @@ class EntityExtractor:
         # L3: Embedding (if embed_fn provided)
         if embed_fn is not None:
             entities.extend(self.detect_slang_variants(text, embed_fn))
+
+        # ── Decide: skip L4 LLM? ──
+        pre_llm_types = set()
+        for e in entities:
+            et = e.get("entity_type", "")
+            if hasattr(et, "value"):
+                et = et.value
+            pre_llm_types.add(et)
+
+        high_value_hit = pre_llm_types & {
+            "wechat", "qq", "phone", "url", "domain",
+            "bank_card", "alipay", "telegram", "email", "crypto_wallet", "slang", "tool",
+        }
+        skip_llm = (
+            len(high_value_hit) >= 2
+            and classification_confidence >= 0.8
+        )
+
+        if skip_llm:
+            logger.info(
+                f"LLM entity extraction skipped: {len(entities)} entities from L1-L3, "
+                f"high-value types={high_value_hit}, confidence={classification_confidence:.2f}"
+            )
+            return entities
 
         # L4: LLM (structured JSON extraction for remaining)
         llm_result = self.extract_llm(text, intent_label)
@@ -212,13 +271,72 @@ class EntityExtractor:
             })
         # Slang candidates from LLM
         for slang in llm_result.get("slang_candidates", []):
+            candidate = self._normalize_slang_candidate(slang, text)
+            if not candidate:
+                continue
             entities.append({
                 "entity_type": EntityType.SLANG,
-                "entity_value": slang,
+                "entity_value": candidate["term"],
                 "extraction_method": ExtractionMethod.LLM,
+                "confidence": candidate["confidence"],
+                "context": candidate["evidence"],
+                "metadata": {
+                    "is_new_slang_candidate": True,
+                    "candidate_meaning": candidate["suggested_meaning"],
+                    "candidate_reason": candidate["reason"],
+                },
             })
 
         return entities
+
+    @staticmethod
+    def _normalize_slang_candidate(candidate, text: str) -> dict | None:
+        """Normalize LLM slang candidate output for both dict and string formats."""
+        if isinstance(candidate, str):
+            term = candidate.strip()
+            suggested_meaning = ""
+            reason = "LLM从上下文中识别出的疑似黑话"
+            confidence = 0.6
+            evidence = ""
+        elif isinstance(candidate, dict):
+            term = (
+                candidate.get("term")
+                or candidate.get("word")
+                or candidate.get("slang")
+                or candidate.get("value")
+                or ""
+            ).strip()
+            suggested_meaning = (
+                candidate.get("suggested_meaning")
+                or candidate.get("meaning")
+                or candidate.get("normalized_meaning")
+                or ""
+            )
+            reason = candidate.get("reason") or "LLM从上下文中识别出的疑似黑话"
+            confidence = candidate.get("confidence", 0.6)
+            evidence = candidate.get("evidence") or ""
+        else:
+            return None
+
+        if not term:
+            return None
+        if not evidence:
+            idx = text.find(term)
+            if idx >= 0:
+                evidence = text[max(0, idx - 24): idx + len(term) + 24]
+            else:
+                evidence = text[:120]
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = 0.6
+        return {
+            "term": term,
+            "suggested_meaning": suggested_meaning or "待人工确认",
+            "reason": reason,
+            "confidence": max(0.0, min(confidence, 1.0)),
+            "evidence": evidence,
+        }
 
     def extract_l1_l2_only(self, text: str, embed_fn=None, intent_label: str = "") -> list[dict]:
         """Degraded extraction: L1 (regex) + L2 (dict) + L3 (embedding) only.

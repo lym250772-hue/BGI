@@ -68,6 +68,8 @@ class EntityType(str, Enum):
     PHONE = "phone"
     WECHAT = "wechat"
     QQ = "qq"
+    TELEGRAM = "telegram"
+    EMAIL = "email"
     URL = "url"
     DOMAIN = "domain"
     IP = "ip"
@@ -75,6 +77,7 @@ class EntityType(str, Enum):
     ALIPAY = "alipay"
     SLANG = "slang"
     TOOL = "tool"
+    CRYPTO_WALLET = "crypto_wallet"
     FEATURE = "feature"
 
 
