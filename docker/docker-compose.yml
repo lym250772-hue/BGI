@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
@@ -111,6 +109,11 @@ services:
     ports:
       - "8030:8030"
       - "9030:9030"
+    networks:
+      default:
+        # Doris FE stores its edit-log host in metadata. Keep this stable so
+        # Docker restarts do not leave FE waiting forever in UNKNOWN state.
+        ipv4_address: 172.20.0.8
     volumes:
       - ./doris/entrypoint.sh:/opt/doris/entrypoint.sh
       - doris_fe_meta:/opt/doris/fe/doris-meta
@@ -135,6 +138,9 @@ services:
     ports:
       - "9050:9050"
       - "8040:8040"
+    networks:
+      default:
+        ipv4_address: 172.20.0.9
     volumes:
       - ./doris/entrypoint.sh:/opt/doris/entrypoint.sh
       - doris_be_storage:/opt/doris/be/storage
@@ -155,3 +161,9 @@ volumes:
   doris_fe_log:
   doris_be_storage:
   doris_be_log:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

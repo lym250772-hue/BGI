@@ -1,8 +1,15 @@
 """Chinese display labels for database and model fields used in the UI."""
 
 FIELD_LABELS = {
+    "id": "ID",
     "raw_id": "情报ID",
     "clean_text": "研判文本",
+    "content_raw": "原始内容",
+    "source_platform": "来源平台",
+    "source_channel": "频道/群组",
+    "author_name": "作者",
+    "collect_time": "接收时间",
+    "raw_status": "处理状态",
     "risk_label": "风险大类",
     "risk_sub_label": "风险细分",
     "risk_score": "风险分",
@@ -11,6 +18,7 @@ FIELD_LABELS = {
     "entity_type": "线索类型",
     "entity_value": "线索值",
     "extraction_method": "抽取方式",
+    "extract_method": "抽取方式",
     "confidence": "置信度",
     "context": "上下文",
     "term": "黑话",
@@ -49,9 +57,13 @@ EXTRACTION_METHOD_LABELS = {
 
 CLASSIFICATION_METHOD_LABELS = {
     "keyword": "规则命中",
+    "regex": "规则命中",
     "roberta": "小模型判定",
+    "nlp": "小模型判定",
     "llm": "大模型研判",
     "degraded": "降级判定",
+    "manual": "人工修正",
+    "unknown": "未知",
 }
 
 RISK_LEVEL_LABELS = {
@@ -60,12 +72,33 @@ RISK_LEVEL_LABELS = {
     "normal": "中风险",
     "medium": "中风险",
     "low": "低风险",
+    "": "未判定",
 }
 
 SLANG_STATUS_LABELS = {
     "active": "正式词典",
     "candidate": "待审核",
     "rejected": "已忽略",
+}
+
+RAW_STATUS_LABELS = {
+    "RAW_COLLECTED": "待研判",
+    "CLEANED": "已清洗待研判",
+    "ANALYZING": "研判中",
+    "ANALYZED": "已研判",
+    "FAILED": "研判失败",
+    "DISCARDED": "已丢弃",
+    "pending": "待执行",
+    "running": "执行中",
+    "success": "已完成",
+    "failed": "失败",
+}
+
+JOB_STATUS_LABELS = {
+    "pending": "排队中",
+    "running": "执行中",
+    "success": "已完成",
+    "failed": "失败",
 }
 
 
@@ -91,3 +124,11 @@ def risk_level_label(value: str) -> str:
 
 def slang_status_label(value: str) -> str:
     return SLANG_STATUS_LABELS.get(str(value or ""), str(value or ""))
+
+
+def raw_status_label(value: str) -> str:
+    return RAW_STATUS_LABELS.get(str(value or ""), str(value or "-"))
+
+
+def job_status_label(value: str) -> str:
+    return JOB_STATUS_LABELS.get(str(value or ""), str(value or "-"))

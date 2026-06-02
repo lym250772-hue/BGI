@@ -1,108 +1,78 @@
-"""BGI Intelligence Analysis Dashboard."""
+"""BGI Streamlit analyst console."""
+
+from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
-from datetime import datetime
 
 import ui.theme as T
-from ui.views import (
-    analysis_workbench,
-    dashboard,
-    intel_list,
-    entities,
-    graph,
-    cheat_scripts,
-    slang_dict,
-    slang_workbench,
-)
+from ui.views import intel_pool, knowledge, overview, system_status, workbench
+
 
 st.set_page_config(
-    page_title="BGI 情报分析",
-    page_icon="\U0001f50d",
+    page_title="BGI 黑灰产情报研判",
+    page_icon="B",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 st.markdown(T.CSS, unsafe_allow_html=True)
 
-# ---- Sidebar ----
-with st.sidebar:
-    # Brand block
-    st.markdown(
-        f"""<div style="padding:0.2rem 0.5rem 0.8rem 0.5rem">
-        <div style="display:flex;align-items:center;gap:10px;">
-        <div style="width:30px;height:30px;background:{T.ACCENT};border-radius:6px;
-        display:flex;align-items:center;justify-content:center;color:white;
-        font-weight:700;font-size:0.95rem">B</div>
-        <div>
-        <div style="font-weight:600;color:{T.TEXT_MAIN};font-size:0.93rem">BGI</div>
-        <div style="font-size:0.62rem;color:{T.TEXT_MUTED};letter-spacing:0.03em">INTELLIGENCE ANALYSIS</div>
-        </div></div></div>""",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        f"""<div style="font-size:0.6rem;color:{T.TEXT_MUTED};letter-spacing:0.08em;
-        text-transform:uppercase;padding:0.3rem 0.5rem 0.4rem 0.5rem">Navigation</div>""",
-        unsafe_allow_html=True,
-    )
-
-    nav_labels = [
-        "研判工作台",
-        "批量黑话研判",
-        "情报态势",
-        "情报池",
-        "线索库",
-        "关系扩线",
-        "作恶链路",
-        "黑话词典",
-    ]
-    nav_keys = [
-        "workbench", "slang_workbench", "dashboard", "intel_list",
-        "entities", "graph", "cheat_scripts", "slang_dict",
-    ]
-
-    current_page = st.session_state.get("nav_page", "workbench")
-    current_idx = nav_keys.index(current_page) if current_page in nav_keys else 0
-
-    selected = st.sidebar.radio(
-        "Navigation",
-        nav_labels,
-        index=current_idx,
-        label_visibility="collapsed",
-        key="nav_radio",
-    )
-
-    new_page = nav_keys[nav_labels.index(selected)]
-    if new_page != current_page:
-        st.session_state.nav_page = new_page
-        st.rerun()
-
-    # Footer
-    st.sidebar.markdown(
-        f"""<div style="position:fixed;bottom:1rem;left:0;right:0;padding:0.7rem 1rem;
-        border-top:1px solid {T.BORDER};margin:0 0.5rem;
-        font-size:0.65rem;color:{T.TEXT_MUTED}">
-        BGI v0.4 · {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>""",
-        unsafe_allow_html=True,
-    )
-
-# ---- Router ----
-page = st.session_state.get("nav_page", "workbench")
-
-ROUTES = {
-    "workbench":    analysis_workbench.show,
-    "slang_workbench": slang_workbench.show,
-    "dashboard":    dashboard.show,
-    "intel_list":   intel_list.show,
-    "entities":     entities.show,
-    "graph":        graph.show,
-    "cheat_scripts": cheat_scripts.show,
-    "slang_dict":   slang_dict.show,
+PAGES = {
+    "overview": ("总览 / ChatBI", overview.show),
+    "workbench": ("研判工作台", workbench.show),
+    "intel_pool": ("情报池", intel_pool.show),
+    "knowledge": ("知识库", knowledge.show),
+    "system": ("系统状态", system_status.show),
 }
 
-ROUTES.get(page, analysis_workbench.show)()
+
+def _sidebar():
+    with st.sidebar:
+        st.markdown(
+            """
+            <div style='padding:0.4rem 0.4rem 1rem'>
+              <div style='font-size:1.2rem;font-weight:800;color:#FFFFFF'>BGI</div>
+              <div style='font-size:0.72rem;color:#92A1AF;margin-top:2px'>黑灰产情报研判 Agent</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        keys = list(PAGES.keys())
+        labels = [PAGES[k][0] for k in keys]
+        current = st.session_state.get("nav_page", "overview")
+        if current not in keys:
+            current = "overview"
+
+        selected = st.radio(
+            "导航",
+            labels,
+            index=keys.index(current),
+            label_visibility="collapsed",
+        )
+        selected_key = keys[labels.index(selected)]
+        if selected_key != current:
+            st.session_state.nav_page = selected_key
+            st.rerun()
+
+        st.markdown(
+            f"""
+            <div style='position:fixed;bottom:0.8rem;left:0.8rem;right:0.8rem;
+                        border-top:1px solid #25313E;padding-top:0.6rem;
+                        font-size:0.68rem;color:#7F8D99'>
+              v0.5 Console<br>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+_sidebar()
+page_key = st.session_state.get("nav_page", "overview")
+PAGES.get(page_key, PAGES["overview"])[1]()

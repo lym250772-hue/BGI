@@ -77,6 +77,18 @@ class DorisStore:
         finally:
             c.close()
 
+    def healthcheck(self) -> bool:
+        """Return True when Doris FE is reachable through the MySQL protocol."""
+        if not settings.doris_enabled:
+            return False
+        try:
+            self._disabled_until = 0.0
+            with self.cursor() as c:
+                c.execute("SELECT 1 AS ok")
+                return bool(c.fetchone())
+        except Exception:
+            return False
+
     # ── Init ───────────────────────────────────────────────────────────
 
     def init_tables(self):

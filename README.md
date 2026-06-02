@@ -1,109 +1,93 @@
-# BAGI 智能黑灰产情报研判与主动式可追溯反欺诈 Agent 平台
+# BGI 智能黑灰产情报研判 Agent
 
-## 1. 项目定位
+BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析系统。它从队友交付的结构化 JSONL 情报开始，完成清洗去重、风险意图分类、实体抽取、黑话归一、新黑话候选发现、证据片段提取、风险评分、关系扩线、结构化入库和轻量 ChatBI 态势问答。
 
-BAGI 是一个面向黑灰产情报治理的智能研判平台，目标是把来自 Telegram、贴吧、微博、知乎、论坛等渠道的高噪声文本情报，转化为可查询、可解释、可追溯、可沉淀的结构化风险知识。
+当前版本的核心定位很明确：**把散落的黑灰产文本情报，自动变成可查询、可扩线、可复核的结构化线索库**。
 
-项目的核心不是简单调用大模型生成报告，而是构建一条工程化闭环：
+## 1. 项目边界
 
-```text
-结构化情报接收
-  -> 文本清洗与去重
-  -> 风险分类
-  -> 实体抽取
-  -> 黑话识别与归一
-  -> 疑似新黑话发现
-  -> 证据片段提取
-  -> 风险打分
-  -> 图谱扩线
-  -> 持久化入库
-  -> 前端研判与人工反馈
-  -> 词典和样本回流
-```
+本项目当前主要负责“数据结构化之后”的分析与研判链路。
 
-系统希望解决的真实痛点：
+- 队友侧：负责爬取 IM、群组、论坛、贴吧、微博、知乎等来源，并尽量输出统一 JSONL。
+- BGI 侧：接收结构化 JSONL，写入 MySQL 原始情报表，然后执行清洗、分类、实体抽取、黑话研判、图谱扩线、Doris 聚合和前端展示。
+- OCR/ASR：代码结构允许接入，但当前主链路以文本情报为主，图片和语音解析依赖上游采集侧是否交付结果。
+- Java/Spring Boot：当前项目没有 Java 后端，控制面由 Python + FastAPI + Streamlit 承担。
 
-- 黑灰产内容体量大、来源多、格式脏。
-- 黑话变化快，传统规则很难长期覆盖。
-- 单条情报价值有限，需要通过账号、联系方式、链接、工具、黑话做关联扩线。
-- 直接让大模型判断容易慢、贵、不可控、容易幻觉。
-- 比赛演示需要清晰展示“系统为什么这么判断”，而不是只给一个结论。
+## 2. 当前能力总览
 
-因此 BAGI 采用“规则优先、小模型承接、大模型兜底、人工闭环修正”的架构。
-
-## 2. 当前实现状态
-
-当前项目已经实现一个可演示的纯 Python 版本：
-
-- FastAPI：提供 API 服务和异步研判任务接口。
-- Streamlit：提供研判工作台、情报池、线索库、关系扩线、黑话词典、批量黑话研判等页面。
-- MySQL：保存原始情报、清洗结果、研判结果、实体、黑话词典、人工反馈、异步任务。
-- Neo4j：保存情报和实体关系，用于关系扩线与团伙关联。
-- Milvus：保存黑话和情报向量，用于语义相似检索。
-- Doris：作为可选 OLAP 分析库，用于后续 ChatBI 或大屏统计增强。
-- 本地 RoBERTa 分类器：作为 L2 小模型分类层。
-- 本地 SentenceTransformer 向量模型：用于黑话相似匹配和 Milvus 检索。
-- LLM：作为分类、实体抽取、证据解释中的兜底能力。
-
-当前没有独立 Spring Boot 后端。比赛 MVP 以 Python 全栈完成，Java/Spring Boot 可作为后续工程化增强方向。
+| 模块 | 当前状态 | 说明 |
+|---|---:|---|
+| 结构化数据接入 | 已实现 | `scripts/importers/import_partner_jsonl.py` 支持队友 JSONL 导入、字段校验、去重入库 |
+| 清洗去重 | 已实现 | HTML 剥离、空白规范化、SimHash 去重、噪声过滤、高危关键词标记 |
+| 风险分类 | 已实现 | L1 规则优先，L2 RoBERTa 接口预留，L3 LLM 兜底，支持降级 |
+| 实体抽取 | 已实现 | 正则、黑话词典、Milvus 相似检索、LLM 结构化抽取四级级联 |
+| 黑话归一 | 已实现 | 命中 `dim_slang_dict` 后输出标准释义；模型发现的新词进入候选黑话 |
+| 证据片段 | 已实现 | 规则证据、实体上下文、LLM 证据三通道 |
+| 风险评分 | 已实现 | 综合分类置信度、实体强度、证据数量、图谱扩线等因素 |
+| 异步研判 | 已实现 | 前端提交任务后后台线程池处理，页面不再被单条数据阻塞 |
+| Neo4j 图谱 | 已实现 | 将情报、账号、联系方式、链接、工具、黑话等保存为节点和关系 |
+| Milvus 向量库 | 已实现 | 黑话相似检索、历史情报相似检索 |
+| Doris OLAP | 已实现 | 研判结果写入宽表，用于趋势聚合和 ChatBI 数据底座 |
+| Streamlit 前端 | 已实现 | 总览/ChatBI、研判工作台、情报池、知识库、系统状态 |
+| 轻量 ChatBI | 已实现 | 白名单指标问答，不让大模型自由生成 SQL |
+| 小模型训练 | 已提供脚本 | `scripts/modeling/train_roberta.py` 可训练 RoBERTa；是否生效取决于本地模型是否训练完成 |
 
 ## 3. 技术架构
 
 ```mermaid
+flowchart LR
+    A["队友 JSONL 数据"] --> B["导入适配器\nimport_partner_jsonl.py"]
+    B --> C["MySQL ODS\nods_raw_intel"]
+    C --> D["清洗去重\ncleaner.pipeline"]
+    D --> E["Agent 状态机\nanalyzer.state_machine"]
+
+    E --> F["风险分类\n规则 / RoBERTa / LLM"]
+    E --> G["实体抽取\n正则 / 词典 / 向量 / LLM"]
+    G --> H["黑话归一与候选发现"]
+    G --> I["Neo4j 关系扩线"]
+    E --> J["证据片段与风险评分"]
+
+    J --> K["MySQL DWD/ADS\n分析结果、实体、报告、任务"]
+    I --> L["Neo4j 图数据库"]
+    H --> M["Milvus 向量库"]
+    J --> N["Doris OLAP 宽表"]
+
+    K --> O["Streamlit 前端"]
+    L --> O
+    M --> O
+    N --> O
+```
+
+核心原则：
+
+- **规则优先**：能用规则、词典、向量解决的，不优先调用大模型。
+- **LLM 兜底**：黑话变体、复杂语义和证据解释由 LLM 补足。
+- **事实落库**：LLM 输出必须沉淀为结构化字段，前端展示以数据库事实为准。
+- **图谱不抢跑**：Neo4j 扩线必须等实体抽取完成后才执行，因为扩线依赖账号、联系方式、链接、工具等实体。
+- **ChatBI 不自由写 SQL**：当前采用白名单问题到固定 SQL 的方式，降低幻觉和误查风险。
+
+## 4. 主流程
+
+```mermaid
 flowchart TD
-    A["结构化情报 JSON / JSONL"] --> B["MySQL ods_raw_intel 原始情报"]
-    B --> C["清洗与去重"]
-    C --> D["Agent 研判引擎"]
-
-    D --> D1["L1 规则分类"]
-    D1 --> D2["L2 RoBERTa 小模型"]
-    D2 --> D3["L3 LLM 兜底"]
-
-    D --> E["实体抽取"]
-    E --> E1["正则"]
-    E --> E2["黑话词典"]
-    E --> E3["Milvus 向量相似"]
-    E --> E4["LLM 复杂实体"]
-
-    D --> F["证据提取与风险打分"]
-    D --> G["Neo4j 图谱扩线"]
-    D --> H["疑似新黑话候选池"]
-
-    F --> I["MySQL 研判结果"]
-    G --> J["Neo4j 实体关系图谱"]
-    E3 --> K["Milvus 向量库"]
-    I --> L["Doris 可选分析宽表"]
-
-    I --> M["Streamlit 前端"]
-    H --> M
-    M --> N["人工确认 / 修正"]
-    N --> O["黑话词典与训练样本回流"]
+    S["RAW_COLLECTED\n队友数据已接收"] --> C["CLEANED\n文本清洗与去重完成"]
+    C --> Q["ANALYZING\n异步任务研判中"]
+    Q --> A["ANALYZED\n研判成功"]
+    Q --> F["FAILED\n研判失败，可重试"]
+    C --> D["DISCARDED\n噪声或重复数据丢弃"]
 ```
 
-## 4. 目录结构
+主流水线分三层：
 
-```text
-BGI/
-  agents/                 图谱扩线、报告摘要等 Agent 工具
-  analyzer/               分类、实体抽取、证据提取、风险打分、状态机研判引擎
-  api/                    FastAPI 服务
-  cleaner/                文本清洗、去重相关逻辑
-  collectors/             采集器代码，当前主要由搭档侧负责
-  config/                 配置中心、风险规则
-  data/                   本地数据、种子词典、模型目录
-  docker/                 MySQL、Neo4j、Milvus、Doris 等容器配置
-  scripts/                数据导入、模型训练、演示脚本
-  storage/                MySQL、Neo4j、Milvus、Doris 访问层
-  tests/                  单元测试
-  ui/                     Streamlit 前端
-  main.py                 命令行入口
-  schema.py               项目枚举和基础数据模型
-  README.md               当前唯一项目说明文档
-```
+| 层级 | 作用 | 主要文件 |
+|---|---|---|
+| 第一层：主流水线 | 数据接入、清洗去重、分类、实体抽取、结构化入库 | `scripts/importers/`、`cleaner/`、`analyzer/`、`storage/mysql_store.py` |
+| 第二层：研判增强 | 黑话归一、新黑话候选、风险打分、证据片段、关系扩线 | `analyzer/state_machine.py`、`analyzer/evidence_extractor.py`、`analyzer/risk_scorer.py`、`agents/graph_agent.py` |
+| 第三层：展示增强 | 态势看板、批量队列、知识库、Doris 聚合、轻量问答 | `ui/`、`storage/doris_store.py` |
 
-## 5. 数据输入格式
+## 5. 一条数据如何被处理
 
-搭档侧爬虫和清洗后，建议统一交付 JSONL，每行一条情报。示例：
+队友交付示例：
 
 ```json
 {
@@ -125,778 +109,522 @@ BGI/
 }
 ```
 
-进入系统后会映射为：
+### 5.1 接收入库
 
-| 输入字段 | 入库字段 | 说明 |
-|---|---|---|
-| `platform` | `source_platform` | 来源平台 |
-| `content_raw` | `content_raw` | 原始文本 |
-| `source_url` | `source_url` | 原始链接 |
-| `author_uid` | `author_id` | 作者账号ID |
-| `author_username` | `author_name` | 作者昵称 |
-| `collected_at` | `collect_time` | 采集时间 |
-| `metadata` | `metadata` | 附加元数据 |
+脚本：`scripts/importers/import_partner_jsonl.py`
 
-## 6. 核心研判流程
+输入：一行一个 JSON 对象的 JSONL 文件。
 
-### 6.1 数据接收
+处理逻辑：
 
-入口：
+1. 校验必填字段：`platform`、`content_raw`、`content_type`、`collected_at`。
+2. 将队友字段映射为系统字段，例如 `author_uid -> author_id`、`author_username -> author_name`。
+3. 按 `source_platform + source_url` 或 `message_id` 做幂等检查。
+4. 写入 MySQL `ods_raw_intel`，状态为 `RAW_COLLECTED`。
 
-- `storage/mysql_store.py`
-- `insert_raw(item)`
-
-作用：
-
-将搭档侧交付的结构化 JSON 写入 `ods_raw_intel`。
-
-输出：
-
-- `raw_id`
-- 原始情报状态：`RAW_COLLECTED`
-
-### 6.2 清洗与去重
-
-主要文件：
-
-- `cleaner/pipeline.py`
-- `cleaner/simhash_py.py`
-
-处理内容：
-
-- 去 HTML 标签。
-- 全角半角归一。
-- 噪声评分。
-- SimHash 指纹计算。
-- 重复或近重复内容识别。
-
-示例：
-
-```text
-原始文本：
-<div>高价收料!!! 加 V: test_wx888，跑分稳定</div>
-
-清洗后：
-高价收料 加V test_wx888 跑分稳定
-```
-
-结果写入：
-
-- `dwd_clean_intel`
-
-### 6.3 风险分类
-
-主要文件：
-
-- `analyzer/classifier.py`
-
-分类采用三级级联：
-
-```text
-L1 规则层
-  关键词、正则、风险短语命中
-
-L2 小模型层
-  本地 RoBERTa 文本分类器
-
-L3 大模型兜底层
-  DeepSeek 或兼容 OpenAI API 的 LLM
-```
-
-代码入口：
-
-```python
-classifier.classify(text, skip_llm=False)
-```
-
-输出示例：
+落库后的关键字段：
 
 ```json
 {
-  "intent_label": "工具交易",
-  "sub_label": "脚本/外挂",
-  "confidence": 0.95,
-  "method": "keyword"
+  "source_platform": "telegram",
+  "source_channel": "直播技术",
+  "source_url": "https://t.me/直播技术/24305904",
+  "author_id": "906341966",
+  "author_name": "外挂脚本",
+  "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 douyin_pro888。工具下载 https://linktr.ee/douyin_pro",
+  "raw_status": "RAW_COLLECTED"
 }
 ```
 
-说明：
+### 5.2 清洗去重
 
-- 如果规则命中，直接返回高置信度结果。
-- 如果规则不命中，进入 RoBERTa 小模型。
-- 如果小模型低置信度或不可用，再交给大模型。
-- 如果用户选择“快速筛查”，会按单任务关闭 LLM，不影响其它并发任务。
+核心文件：`cleaner/pipeline.py`
 
-### 6.4 实体抽取
+处理逻辑：
 
-主要文件：
+1. `normalize()`：去除 HTML 标签、合并空白、去除零宽字符。
+2. `compute_simhash()`：生成文本 SimHash。
+3. `is_duplicate()`：与历史 SimHash 比较，距离小于阈值则判为重复。
+4. `is_noise()`：过滤过短、无意义文本。
+5. `mark_priority()`：命中“跑分、接码、撞库、盗号、外挂”等高危词时标记高优先级。
 
-- `analyzer/entity_extractor.py`
+典型输出：
 
-实体抽取采用四层级联：
-
-```text
-L1 正则抽取
-  手机号、微信、QQ、Telegram、邮箱、URL、域名、IP、银行卡、钱包地址
-
-L2 词典命中
-  已知黑话、工具词、风险术语
-
-L3 向量相似
-  使用 SentenceTransformer + Milvus 发现黑话变体
-
-L4 大模型抽取
-  复杂工具、风险特征、疑似新黑话、隐晦账号关系
+```json
+{
+  "text": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 douyin_pro888。工具下载 https://linktr.ee/douyin_pro",
+  "simhash": "0x8f4a...",
+  "is_duplicate": false,
+  "is_noise": false,
+  "priority": "high",
+  "should_discard": false
+}
 ```
 
-示例输入：
+数据会写入：
 
-```text
-抖音无人直播技术，全套教程+工具，联系微信 douyin_pro888
+- `dwd_clean_intel.clean_text`
+- `dwd_clean_intel.simhash`
+- `ods_raw_intel.raw_status = CLEANED`
+
+### 5.3 Agent 研判状态机
+
+核心入口：
+
+- `analyzer/engine.py`
+- `analyzer/state_machine.py`
+
+执行顺序：
+
+```mermaid
+flowchart LR
+    A["classify\n风险分类"] --> B["extract_entities\n实体抽取"]
+    B --> C["decide_tools\n工具决策"]
+    C --> D["graph_expand\n有可扩线实体才执行"]
+    C --> E["slang_normalize\n有黑话才执行"]
+    C --> F["dedup_check\n置信度足够才执行"]
+    D --> G["extract_evidence\n证据片段"]
+    E --> G
+    F --> G
+    G --> H["risk_score\n风险评分"]
+    H --> I["generate_report\n摘要与处置建议"]
+    I --> J["persist\n多库同步"]
 ```
 
-可能输出：
+这里的“智能体”不是四个分支无脑并行，而是一个状态机 Agent：先分类、再抽实体，然后根据当前状态决定是否调用图谱扩线、黑话归一和相似检索。
+
+### 5.4 风险分类
+
+核心文件：`analyzer/classifier.py`
+
+三级级联：
+
+1. L1 规则层：从 `config/risk_rules.yaml` 加载关键词、正则、组合规则；命中后直接输出高置信度分类。
+2. L2 小模型层：加载 `settings.roberta_model_path` 指向的 RoBERTa/MacBERT 类文本分类模型；未训练或加载失败时自动跳过。
+3. L3 LLM 层：当前两层无法判断时调用大模型，要求返回固定 JSON。
+
+典型结果：
+
+```json
+{
+  "intent_label": "直播违规",
+  "sub_label": "无人直播",
+  "confidence": 0.86,
+  "method": "keyword 或 llm"
+}
+```
+
+说明：当前代码已经有 RoBERTa 训练脚本，但是否真正进入 L2，取决于本地 `data/models/roberta_classifier` 是否包含完整可加载模型。
+
+### 5.5 实体抽取
+
+核心文件：`analyzer/entity_extractor.py`
+
+四级级联：
+
+1. L1 正则：手机号、微信、QQ、Telegram、邮箱、URL、域名、IP、银行卡、支付宝、虚拟币钱包。
+2. L2 词典：从 MySQL `dim_slang_dict` 加载已知黑话。
+3. L3 向量：切分疑似短语，向 Milvus `slang_embeddings` 检索相似黑话。
+4. L4 LLM：补充复杂工具名、风险标签、隐晦黑话、特征描述。
+
+示例文本可抽取：
 
 ```json
 [
   {
     "entity_type": "wechat",
     "entity_value": "douyin_pro888",
+    "extraction_method": "regex",
+    "context": "详情看主页，联系微信 douyin_pro888。工具下载"
+  },
+  {
+    "entity_type": "url",
+    "entity_value": "https://linktr.ee/douyin_pro",
+    "extraction_method": "regex"
+  },
+  {
+    "entity_type": "domain",
+    "entity_value": "linktr.ee",
     "extraction_method": "regex"
   },
   {
     "entity_type": "tool",
-    "entity_value": "无人直播工具",
+    "entity_value": "抖音无人直播技术",
     "extraction_method": "llm"
-  },
-  {
-    "entity_type": "slang",
-    "entity_value": "无人直播",
-    "extraction_method": "dict"
   }
 ]
 ```
 
-结果写入：
+### 5.6 黑话归一与新黑话候选
 
-- `dwd_entity`
-- Neo4j 实体节点
-- Neo4j 关系边
+黑话处理分两类：
 
-### 6.5 疑似新黑话发现
+- 已知黑话：命中 `dim_slang_dict` 后返回标准释义。
+- 疑似新黑话：由 embedding 或 LLM 发现，但不在 active 词典中，会写入候选状态，供人工确认。
 
-这是当前项目的重要亮点。
+候选黑话会进入：
 
-当 LLM 或向量模型发现某个词像黑话，但它不在正式黑话词典中时，系统不会直接污染正式词典，而是写入候选池。
+- `dim_slang_dict.status = candidate`
+- 前端“知识库 / 黑话词典”中等待确认
 
-流程：
+这一步是比赛里比较关键的亮点：系统不是只会识别已有规则，还能把疑似新词沉淀成词典演化入口。
 
-```text
-模型发现疑似新黑话
-  -> 生成候选词、建议释义、证据片段、发现原因、置信度
-  -> 写入 dim_slang_dict，status=candidate
-  -> 前端黑话词典页展示在“待审核候选”
-  -> 人工选择“加入正式词典”或“忽略该候选”
-```
+### 5.7 证据片段与风险评分
 
-候选输出示例：
-
-```json
-{
-  "term": "白资",
-  "suggested_meaning": "疑似指可用于实名注册或养号的账号资料",
-  "risk_category": "账号黑产",
-  "confidence": 0.73,
-  "evidence": "白资大量出，接码稳定，走担保",
-  "reason": "上下文同时出现交易、接码和担保语境",
-  "source": "llm_candidate"
-}
-```
-
-候选状态：
-
-| 状态 | 含义 |
-|---|---|
-| `active` | 正式黑话词典 |
-| `candidate` | 待人工审核 |
-| `rejected` | 已忽略 |
-
-相关文件：
-
-- `analyzer/entity_extractor.py`
-- `analyzer/state_machine.py`
-- `storage/mysql_store.py`
-- `ui/views/slang_dict.py`
-- `ui/views/analysis_workbench.py`
-
-### 6.6 证据片段提取
-
-主要文件：
+核心文件：
 
 - `analyzer/evidence_extractor.py`
-
-作用：
-
-为风险结论提供可解释证据，而不是只给标签。
-
-证据来源：
-
-- 风险规则命中的文本片段。
-- 实体周边上下文。
-- LLM 对疑难文本的证据解释。
-
-输出示例：
-
-```json
-{
-  "text": "联系微信 douyin_pro888，工具下载 https://linktr.ee/douyin_pro",
-  "risk_point": "站外导流与工具交易",
-  "reason": "文本同时出现联系方式和工具下载链接",
-  "method": "entity_context",
-  "confidence": 0.82
-}
-```
-
-### 6.7 风险打分
-
-主要文件：
-
 - `analyzer/risk_scorer.py`
 
-风险分不是只看分类置信度，而是综合多个因素：
+证据片段用于说明“为什么系统这么判”。例如：
 
-- 分类置信度。
-- 联系方式实体。
-- 外链或域名实体。
-- 工具实体。
-- 黑话命中。
-- 图谱扩线命中。
+```json
+[
+  {
+    "text": "联系微信 douyin_pro888",
+    "risk_point": "站外联系方式",
+    "reason": "出现明确导流账号",
+    "confidence": 0.95,
+    "method": "entity_context"
+  },
+  {
+    "text": "工具下载 https://linktr.ee/douyin_pro",
+    "risk_point": "外链工具分发",
+    "reason": "出现工具下载链接",
+    "confidence": 0.92,
+    "method": "rule"
+  }
+]
+```
 
-输出：
+风险评分会综合：
+
+- 分类置信度
+- 高价值实体数量
+- 黑话数量
+- 外链和联系方式强度
+- 证据片段数量
+- 是否命中图谱扩线
+
+典型输出：
 
 ```json
 {
-  "risk_score": 0.86,
-  "risk_level": "critical"
+  "risk_score": 0.82,
+  "risk_level": "high"
 }
 ```
 
-### 6.8 图谱扩线
+### 5.8 Neo4j 如何保存
 
-主要文件：
-
-- `agents/graph_agent.py`
-- `storage/neo4j_store.py`
-
-Neo4j 用于分析不同情报之间是否共享关键线索。
+核心文件：`storage/neo4j_store.py`
 
 节点类型：
 
-| 节点 | 说明 |
-|---|---|
-| `Intel` | 情报节点 |
-| `Account` | 微信、QQ、Telegram 等账号 |
-| `Contact` | 手机号、邮箱、银行卡、钱包 |
-| `Link` | URL、域名、IP |
-| `Tool` | 工具、脚本、外挂 |
-| `Slang` | 黑话 |
+| 节点 | 含义 | 示例 |
+|---|---|---|
+| `Intel` | 一条原始情报 | `raw_id=24305904` |
+| `Account` | 黑灰产账号 | 微信、QQ、Telegram、支付宝 |
+| `Contact` | 联系或收款载体 | 手机号、邮箱、银行卡 |
+| `Link` | 链接资产 | URL、域名、IP |
+| `Tool` | 工具资产 | 脚本、外挂、接码平台 |
+| `Slang` | 黑话术语 | 跑分、料子、接码 |
+| `Wallet` | 虚拟币钱包 | TRC20、ETH 地址 |
 
 关系类型：
 
-| 关系 | 说明 |
+| 关系 | 含义 |
 |---|---|
-| `MENTIONS` | 情报提到了某个实体 |
-| `PROMOTES` | 情报推广了链接或工具 |
-| `USES_CONTACT` | 账号使用某个联系方式 |
-| `CO_OCCURS` | 实体在同一条情报中共现 |
-| `EXTRACTED_FROM` | 实体来源于某条情报 |
+| `USES_ACCOUNT` | 情报提到了某个账号 |
+| `USES_CONTACT` | 情报提到了手机号、邮箱、银行卡、钱包等联系方式 |
+| `PROMOTES_LINK` | 情报推广了某个链接、域名或 IP |
+| `PROMOTES_TOOL` | 情报推广了工具、脚本或服务 |
+| `USES_SLANG` | 情报使用了某个黑话 |
+| `CO_OCCURS` | 两个实体在同一条情报中共现，或共享联系人后形成关联 |
 
-图谱页不再展示全量大图，而是以一个实体为中心，展示 1 到 2 跳关系，避免画面混乱。
+示例图谱结构：
 
-## 7. 数据库设计
+```mermaid
+flowchart LR
+    I["Intel#24305904"] -->|USES_ACCOUNT| A["Account: douyin_pro888"]
+    I -->|PROMOTES_LINK| L["Link: linktr.ee"]
+    I -->|PROMOTES_TOOL| T["Tool: 抖音无人直播技术"]
+    A -->|CO_OCCURS raw_id=24305904| L
+    A -->|CO_OCCURS raw_id=24305904| T
+```
 
-### 7.1 MySQL
+图谱扩线的目的不是展示一张巨大乱图，而是回答三个问题：
 
-MySQL 是系统主库，负责业务状态、结果持久化和人工反馈。
+1. 当前账号或链接以前是否出现过？
+2. 它是否和其他账号共享联系方式、链接、工具？
+3. 是否能形成疑似团伙或作恶链路？
 
-| 表名 | 中文说明 |
+### 5.9 多库同步
+
+研判完成后，系统会同步写入：
+
+| 存储 | 作用 |
 |---|---|
-| `ods_raw_intel` | 原始情报表 |
-| `dwd_clean_intel` | 清洗情报表 |
-| `dwd_intel_analysis` | 情报研判结果表 |
-| `dwd_entity` | 结构化线索表 |
-| `dwd_entity_relation` | 线索关系表 |
-| `dim_slang_dict` | 黑话词典与候选黑话池 |
-| `ads_risk_case` | 风险案件聚合表 |
-| `agent_report` | Agent 研判摘要表 |
-| `annotation_log` | 人工反馈日志表 |
-| `analysis_job` | 异步研判任务表 |
+| MySQL | 主业务库，保存原始情报、清洗结果、研判结果、实体、候选黑话、任务状态 |
+| Neo4j | 保存实体关系，用于扩线和团伙关联 |
+| Milvus | 保存黑话和情报向量，用于相似检索 |
+| Doris | 保存分析宽表，用于趋势聚合和 ChatBI |
 
-当前核心表已补充中文表注释和字段注释，方便在数据库管理工具中查看。
+如果 Doris 或 Milvus 临时不可用，主流程会尽量降级，不让前端整体崩溃；连接状态可在“系统状态”页面查看。
 
-### 7.2 Neo4j
+## 6. 数据库设计
 
-Neo4j 保存实体关系，用于扩线。
+### 6.1 MySQL
 
-核心目的：
+MySQL 是系统主库。
 
-- 查找共享微信、手机号、域名、工具的情报。
-- 根据共现关系发现疑似团伙。
-- 为前端关系扩线页面提供子图数据。
-
-### 7.3 Milvus
-
-Milvus 保存向量数据。
-
-集合：
-
-| 集合 | 说明 |
+| 表 | 用途 |
 |---|---|
-| `slang_embeddings` | 黑话词向量，用于发现变体黑话 |
-| `intel_embeddings` | 情报文本向量，用于相似情报检索 |
+| `ods_raw_intel` | 原始情报表，保存队友交付的结构化数据和处理状态 |
+| `dwd_clean_intel` | 清洗结果表，保存 clean_text、simhash、去重状态 |
+| `dwd_intel_analysis` | 研判结果表，保存风险分类、评分、证据、摘要 |
+| `dwd_entity` | 实体库，保存账号、链接、黑话、工具等 |
+| `dwd_entity_relation` | 实体关系表，用于 MySQL 侧轻量关系查询 |
+| `dim_slang_dict` | 黑话词典，包含 active/candidate/deprecated 状态 |
+| `ads_risk_case` | 风险案件聚合表，保存疑似团伙或案件级摘要 |
+| `agent_report` | Agent 摘要、证据、处置建议归档 |
+| `annotation_log` | 人工修正日志，用于 HITL 闭环 |
+| `analysis_job` | 异步研判任务表，保存进度、状态、错误信息 |
 
-### 7.4 Doris
+### 6.2 Neo4j
 
-Doris 是可选增强组件。
+Neo4j 用于关系扩线，不承担主数据存储。核心价值是发现“共享账号、共享联系方式、共享域名、共享工具”的关联。
 
-定位：
+### 6.3 Milvus
 
-- 作为 OLAP 分析宽表。
-- 后续支撑 ChatBI。
-- 支撑大屏统计、趋势查询、多维聚合。
+Milvus 当前有两个集合：
 
-当前主流程不依赖 Doris。MySQL、Neo4j、Milvus 是演示主链路。
+- `slang_embeddings`：黑话词向量，用于发现变体黑话。
+- `intel_embeddings`：情报文本向量，用于相似情报检索和去重增强。
 
-## 8. API 设计
+### 6.4 Doris
 
-主要 API 位于：
+Doris 通过 MySQL 协议连接，默认端口是 `9030`。
 
-- `api/server.py`
+核心宽表：
 
-### 8.1 单条研判
+- `bagi_olap.intel_analysis_wide`
 
-```http
-POST /internal/v1/agent/analyze
-```
+它保存一条情报研判后的宽字段，例如风险类型、风险等级、实体数量、黑话数量、证据数量、图谱扩线摘要、处置建议等。前端趋势图和 ChatBI 会优先使用 Doris；如果 Doris 不可用，部分统计会回退到 MySQL。
 
-请求：
+## 7. 前端功能
 
-```json
-{
-  "raw_id": 10086,
-  "platform": "telegram",
-  "text": "接码平台推荐，专业下款通道，联系 TG: @black_channel",
-  "options": {
-    "enable_graph_expand": true,
-    "enable_report": true,
-    "enable_llm": true
-  }
-}
-```
+前端入口：`python main.py ui`
 
-响应：
+当前前端有 5 个页面。
 
-```json
-{
-  "raw_id": 10086,
-  "risk_label": "工具交易",
-  "risk_sub_label": "接码平台推广",
-  "risk_score": 0.86,
-  "risk_level": "high",
-  "evidence_spans": [],
-  "entities": [],
-  "slang_terms": [],
-  "new_slang_candidates": [],
-  "graph_result": {},
-  "agent_summary": "",
-  "disposal_advice": []
-}
-```
+| 页面 | 功能 |
+|---|---|
+| 总览 / ChatBI | 查看接收总量、待研判、研判中、已研判、高危情报、候选黑话；查看风险分布、趋势、近期情报；使用轻量 ChatBI 问答 |
+| 研判工作台 | 选择或输入一条情报，提交异步研判任务，查看风险分类、实体、证据、黑话、扩线结果 |
+| 情报池 | 查看全部情报，按状态筛选，批量提交待研判数据 |
+| 知识库 | 查看实体库、黑话词典、候选黑话和关系扩线入口 |
+| 系统状态 | 查看 MySQL、Neo4j、Milvus、Doris 实时连接状态和错误信息 |
 
-说明：
+### 7.1 轻量 ChatBI
 
-- API 失败时会返回明确错误，不再伪装成空结果成功。
-- `enable_llm` 是单任务参数，不会影响其它并发任务。
+当前 ChatBI 不是自由 Text-to-SQL，而是“自然语言问题 -> 白名单指标查询”。
 
-### 8.2 异步研判任务
+支持的问题类型：
 
-```http
-POST /api/analysis/jobs
-GET  /api/analysis/jobs/{job_id}
-POST /api/analysis/jobs/batch
-```
+- 当前风险类型分布怎么样？
+- 哪个平台高危情报最多？
+- 最近 30 天热门黑话有哪些？
+- 给我 10 条高危典型样本。
+- 当前待研判队列还有多少？
+- 上周贴吧哪个风险分类最活跃？
 
-用途：
+这样做的好处：
 
-- 前端提交任务后不阻塞页面。
-- 批量黑话研判可以并发处理多条数据。
-- 页面可以轮询任务状态。
+- 稳定，适合比赛演示。
+- 不会让大模型编造表名、字段名或 SQL。
+- 查询口径固定，结果可复现。
 
-### 8.3 黑话候选审核
+## 8. API 接口
 
-```http
-GET  /api/slang/candidates
-POST /api/slang/candidates/approve
-POST /api/slang/candidates/reject
-```
-
-用途：
-
-- 查看模型发现的疑似新黑话。
-- 人工确认后加入正式词典。
-- 人工判断误报后标记为忽略。
-
-## 9. 前端页面
-
-前端使用 Streamlit。
-
-### 9.1 研判工作台
-
-文件：
-
-- `ui/views/analysis_workbench.py`
-
-用途：
-
-- 选择单条情报。
-- 选择研判模式。
-- 展示风险结论、证据片段、实体线索、黑话解释、疑似新黑话、图谱扩线结果、处置建议。
-- 支持人工修正。
-
-研判模式：
-
-| 模式 | LLM | 图谱 | 适用场景 |
-|---|---|---|---|
-| 快速筛查 | 关闭 | 关闭 | 大批量快速处理 |
-| 关系扩线 | 关闭 | 开启 | 关注账号、联系方式、团伙关联 |
-| 深度复核 | 开启 | 开启 | 少量疑难样本、新黑话发现 |
-
-### 9.2 批量黑话研判
-
-文件：
-
-- `ui/views/slang_workbench.py`
-
-用途：
-
-- 一次粘贴多条黑话或黑产广告。
-- 后台并发提交任务。
-- 完成一条即可查看一条。
-- 疑似新黑话会进入候选池。
-
-### 9.3 黑话词典
-
-文件：
-
-- `ui/views/slang_dict.py`
-
-用途：
-
-- 浏览正式黑话词典。
-- 审核候选黑话。
-- 忽略误报候选词。
-
-### 9.4 情报池
-
-文件：
-
-- `ui/views/intel_list.py`
-
-用途：
-
-- 浏览已导入情报。
-- 按平台、风险类型、处理状态筛选。
-- 查看风险结论和判定方式。
-
-### 9.5 线索库
-
-文件：
-
-- `ui/views/entities.py`
-
-用途：
-
-- 查看抽取出的账号、链接、黑话、工具等线索。
-- 按线索类型筛选。
-- 支持搜索线索值和上下文。
-
-### 9.6 关系扩线
-
-文件：
-
-- `ui/views/graph.py`
-
-用途：
-
-- 以实体为中心查询 Neo4j。
-- 展示 1 到 2 跳子图。
-- 辅助发现共享联系方式、共享域名、共享工具的团伙线索。
-
-## 10. Agent 的智能性体现
-
-项目不是单纯流水线，智能性体现在以下几点：
-
-### 10.1 自适应工具选择
-
-状态机 Agent 会根据当前结果决定是否调用：
-
-- 图谱扩线工具。
-- 黑话归一工具。
-- 相似情报去重工具。
-- 证据提取工具。
-
-如果没有可扩线实体，图谱查询会跳过。
-
-如果没有黑话实体，黑话归一会跳过。
-
-如果分类置信度太低，相似去重会跳过。
-
-### 10.2 分层降本
-
-系统不是所有数据都调用大模型：
-
-- 规则命中则直接返回。
-- 小模型高置信度则不调用 LLM。
-- 实体抽取如果规则和词典已经命中足够高价值实体，会跳过 LLM。
-- 快速筛查模式会按单任务关闭 LLM。
-
-这可以提高速度，降低成本，也方便答辩时解释工程可落地性。
-
-### 10.3 新黑话发现闭环
-
-当模型发现疑似新黑话时，不直接污染词典，而是进入候选池，由人工确认。
-
-这让系统具备持续成长能力：
-
-```text
-未知黑话
-  -> 模型发现
-  -> 人工确认
-  -> 正式词典
-  -> 后续规则/词典快速命中
-```
-
-这是比赛中非常值得强调的亮点。
-
-## 11. 运行方式
-
-### 11.1 启动基础设施
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
-
-说明：
-
-- MySQL 是主流程必需。
-- Neo4j、Milvus 用于扩线和向量检索。
-- Doris 是可选增强。
-
-### 11.2 初始化数据库
-
-```bash
-python main.py init-db
-```
-
-会执行：
-
-- 建表。
-- 幂等迁移。
-- 中文表注释和字段注释补齐。
-- 黑话词典种子数据导入。
-
-### 11.3 启动前端
-
-```bash
-python main.py ui
-```
-
-访问：
-
-```text
-http://localhost:8501
-```
-
-### 11.4 启动 API
+启动 API：
 
 ```bash
 python main.py api
 ```
 
-### 11.5 导入搭档 JSONL
+核心接口：
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| `GET` | `/health` | 健康检查 |
+| `GET` | `/api/stats` | 看板统计 |
+| `GET` | `/api/intel` | 情报列表 |
+| `GET` | `/api/intel/{raw_id}` | 单条情报详情 |
+| `GET` | `/api/entities` | 实体列表 |
+| `GET` | `/api/entities/{entity_id}/graph` | 查询实体周边图谱 |
+| `GET` | `/api/slang` | 黑话词典 |
+| `POST` | `/internal/v1/agent/analyze` | 同步研判一条情报 |
+| `POST` | `/api/analysis/jobs` | 异步提交一条研判任务 |
+| `POST` | `/api/analysis/jobs/batch` | 批量提交研判任务 |
+| `GET` | `/api/analysis/jobs/{job_id}` | 查询任务进度 |
+
+异步任务接口适合前端批量处理，避免单条研判阻塞页面。
+
+## 9. 命令速查
+
+进入项目目录：
 
 ```bash
-python scripts/importers/import_partner_jsonl.py --file data/partner.jsonl
+cd "C:\Users\刘一鸣\OneDrive\Desktop\BAGI Intelligence Analysis\BGI"
 ```
 
-### 11.6 运行演示数据
+安装依赖：
 
 ```bash
-python scripts/demo/demo_one.py
+pip install -r requirements.txt
 ```
 
-### 11.7 运行测试
+启动基础设施：
+
+```bash
+docker compose -f docker/docker-compose.yml --profile olap up -d
+```
+
+初始化数据库：
+
+```bash
+python main.py init-db
+```
+
+导入队友 JSONL：
+
+```bash
+python scripts/importers/import_partner_jsonl.py data/partner/demo.jsonl --status RAW_COLLECTED
+```
+
+清洗：
+
+```bash
+python main.py clean --limit 500
+```
+
+命令行批量研判：
+
+```bash
+python main.py analyze --limit 200
+```
+
+启动前端：
+
+```bash
+python main.py ui
+```
+
+启动 API：
+
+```bash
+python main.py api --host 0.0.0.0 --port 8000
+```
+
+运行测试：
 
 ```bash
 python -m pytest tests -q
 ```
 
-当前验证结果：
+训练 RoBERTa 分类模型：
 
-```text
-41 passed
+```bash
+python scripts/modeling/train_roberta.py --epochs 3
 ```
 
-## 12. 当前已解决的关键问题
+## 10. 配置说明
 
-### 12.1 前端阻塞问题
+主要配置在 `.env` 和 `config/settings.py`。
 
-已引入异步任务表 `analysis_job` 和后台线程池。
+常用环境变量：
 
-前端可以提交任务后继续操作，不必等待当前研判完成。
+```env
+BGI_MYSQL_HOST=localhost
+BGI_MYSQL_PORT=3306
+BGI_MYSQL_USER=bagi
+BGI_MYSQL_PASSWORD=bagi2026pass
+BGI_MYSQL_DATABASE=bagi_intel
 
-### 12.2 LLM 全局串扰问题
+BGI_NEO4J_URI=bolt://localhost:7687
+BGI_NEO4J_USER=neo4j
+BGI_NEO4J_PASSWORD=bagi2026neo4j
 
-已修复。
+BGI_MILVUS_HOST=localhost
+BGI_MILVUS_PORT=19530
 
-`enable_llm` 现在是单任务参数，不会因为一个任务选择快速筛查而影响其它深度复核任务。
+BGI_DORIS_ENABLED=true
+BGI_DORIS_HOST=localhost
+BGI_DORIS_PORT=9030
+BGI_DORIS_USER=root
+BGI_DORIS_PASSWORD=
+BGI_DORIS_DATABASE=bagi_olap
 
-### 12.3 API 静默失败问题
-
-已修复。
-
-研判 API 失败时返回明确错误，不再返回空结果伪装成功。
-
-### 12.4 模型文件污染仓库问题
-
-已处理。
-
-`data/models` 保留本地文件，但不进入 Git 跟踪。
-
-### 12.5 前端字段名不友好问题
-
-已处理。
-
-新增 `ui/labels.py`，把数据库字段和枚举值映射成中文业务表达。
-
-### 12.6 数据库缺少中文注释问题
-
-已处理。
-
-核心表和关键字段已增加中文 COMMENT。
-
-### 12.7 黑话词典缺少增长闭环
-
-已处理。
-
-模型发现的新黑话会进入候选池，人工确认后进入正式词典。
-
-## 13. 当前不足与后续优化
-
-### 13.1 代码结构仍可继续拆分
-
-当前两个文件仍偏大：
-
-- `storage/mysql_store.py`
-- `analyzer/state_machine.py`
-
-后续建议拆成：
-
-```text
-storage/mysql/
-  schema.py
-  raw_repo.py
-  analysis_repo.py
-  entity_repo.py
-  slang_repo.py
-  job_repo.py
-  annotation_repo.py
-
-analyzer/
-  agent_engine.py
-  agent_tools.py
-  persistence.py
-  tracing.py
+BGI_LLM_API_KEY=你的 API Key
+BGI_LLM_API_BASE=https://api.deepseek.com/v1
+BGI_LLM_MODEL=deepseek-chat
 ```
 
-### 13.2 OCR/ASR 仍依赖上游
+Doris 注意事项：
 
-当前主链路以文本为主。
+- DataGrip 或 JDBC 连接 Doris 时使用 MySQL 驱动。
+- 端口使用 `9030`，不是 Web 控制台端口 `8030`。
+- 如果出现 `Can not read response from server`，通常是 FE 还没完全 ready、BE 未注册成功、或客户端连接到了错误端口。
 
-如果搭档侧能稳定提供 OCR/ASR 结果，可以进一步增强多模态能力。
-
-### 13.3 Doris ChatBI 尚未作为主演示能力
-
-Doris 已作为可选分析库接入方向，但自然语言转 SQL 的 ChatBI 还不是当前主链路。
-
-比赛演示建议先突出：
-
-- 研判工作台。
-- 批量黑话研判。
-- 新黑话候选池。
-- 关系扩线。
-
-### 13.4 小模型效果依赖训练质量
-
-RoBERTa 分类器已经作为 L2 层存在，但实际效果取决于训练样本质量。
-
-后续可以将人工修正样本持续回流，提升小模型覆盖率，减少 LLM 调用。
-
-## 14. 比赛演示建议
-
-### 场景一：单条情报研判
-
-输入：
+## 11. 项目目录
 
 ```text
-抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 douyin_pro888。
+BGI/
+├── agents/                  # 图谱扩线、报告摘要等 Agent 辅助模块
+├── analyzer/                # 分类、实体抽取、证据、评分、状态机、异步 worker
+├── api/                     # FastAPI 接口
+├── cleaner/                 # 文本清洗、SimHash 去重
+├── collectors/              # 早期采集实验代码；当前主流程不依赖
+├── config/                  # 配置与风险规则
+├── data/                    # 模型、词典、样例数据
+├── docker/                  # MySQL、Neo4j、Milvus、MinIO、Doris 编排
+├── scripts/
+│   ├── crawl/               # 采集 smoke 测试
+│   ├── data/                # mock 数据生成
+│   ├── demo/                # 单条演示脚本
+│   ├── importers/           # JSONL、黑话词典导入
+│   └── modeling/            # RoBERTa 训练脚本
+├── storage/                 # MySQL、Neo4j、Milvus、Doris 访问层
+├── tests/                   # 单元测试
+├── ui/                      # Streamlit 前端
+├── main.py                  # CLI 入口
+├── schema.py                # 共享枚举和数据结构
+└── README.md                # 当前唯一项目说明文档
 ```
 
-展示：
+## 12. 比赛演示建议
 
-- 风险分类为工具交易或直播违规。
-- 抽取微信号。
-- 抽取工具或黑话。
-- 展示证据片段。
-- 给出处置建议。
+推荐演示顺序：
 
-### 场景二：疑似新黑话发现
+1. 在“情报池”展示队友导入的多平台情报，说明数据源已经统一进入 `RAW_COLLECTED`。
+2. 批量提交 10 到 20 条待研判情报，展示异步任务不会卡住页面。
+3. 在“研判工作台”打开一条典型黑话情报，展示风险分类、实体、证据、黑话归一、候选新黑话。
+4. 在“知识库”查看实体和候选黑话，说明系统具备数据飞轮和人工复核入口。
+5. 在“总览 / ChatBI”问“哪个平台高危情报最多”“最近 30 天热门黑话有哪些”，展示 Doris/MySQL 事实聚合。
+6. 在“系统状态”展示 MySQL、Neo4j、Milvus、Doris 都在线，证明工程完整性。
 
-输入：
+## 13. 当前不足与下一步
 
-```text
-白资大量出，接码稳定，走担保，量大优惠。
-```
+| 问题 | 影响 | 建议 |
+|---|---|---|
+| L2 小模型未必已训练完成 | 大量规则外样本会落到 LLM，速度和成本受影响 | 使用 4090 训练 RoBERTa/MacBERT，并把验证集 F1 写入答辩材料 |
+| OCR/ASR 不是当前主链路 | 图片、语音黑话无法完整覆盖 | 要求队友把 OCR/ASR 文本作为 `metadata.ocr_text/asr_text` 或单独字段交付 |
+| 候选黑话需要更强 HITL | 新词可以发现，但人工确认流程还可以更顺 | 前端增加“通过/驳回/编辑释义”后自动刷新词典和 Milvus |
+| 图谱扩线仍偏数据驱动 | 小样本时图谱冲击力有限 | 准备一组共享微信、手机号、域名的演示数据，突出团伙关联 |
+| Doris 与 MySQL 可能存在历史不同步 | 重跑或中断后宽表计数可能不一致 | 增加一键 Doris 重建脚本，从 MySQL 最新研判结果回灌宽表 |
+| 评测指标还不够完整 | 答辩时难证明“效果好” | 增加分类准确率、实体抽取准确率、平均研判耗时、LLM 调用比例等指标看板 |
 
-展示：
+## 14. 一句话总结
 
-- 系统发现“白资”为疑似新黑话。
-- 给出模型建议释义。
-- 展示证据和原因。
-- 人工点击加入正式词典。
-- 再次研判时词典可直接命中。
-
-### 场景三：关系扩线
-
-输入一个微信号、Telegram 账号、手机号或域名。
-
-展示：
-
-- 该实体关联的历史情报。
-- 共享联系方式或共享域名。
-- 疑似团伙关系。
-
-### 场景四：批量黑话研判
-
-一次粘贴多条情报。
-
-展示：
-
-- 后台异步任务。
-- 多条任务并发执行。
-- 完成一条即可查看一条结果。
-- 页面不会卡死。
-
-## 15. 一句话总结
-
-BAGI 当前已经形成一个可演示、可解释、可追溯、可持续学习的黑灰产情报研判 Agent 平台。它的核心价值不是“用大模型写报告”，而是通过规则、小模型、向量检索、大模型和人工反馈闭环，把高噪声黑灰产文本转化为结构化线索、风险证据、关系图谱和可增长的黑话知识库。
+BGI 当前已经覆盖课题要求的主线：**情报采集接入 -> 智能清洗 -> 意图分类 -> 实体抽取**，并在此基础上扩展了黑话归一、候选新词、图谱扩线、异步研判、Doris 聚合和轻量 ChatBI。下一阶段最值得投入的是小模型训练、候选黑话 HITL、Doris 重建脚本和比赛演示数据集。

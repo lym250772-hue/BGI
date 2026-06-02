@@ -43,6 +43,28 @@ class IntelStatus(str, Enum):
     DISCARDED = "discarded"
 
 
+class RawIntelStatus(str, Enum):
+    RAW_COLLECTED = "RAW_COLLECTED"
+    CLEANED = "CLEANED"
+    ANALYZING = "ANALYZING"
+    ANALYZED = "ANALYZED"
+    FAILED = "FAILED"
+    DISCARDED = "DISCARDED"
+
+
+RAW_PENDING_STATUSES = (
+    RawIntelStatus.RAW_COLLECTED.value,
+    RawIntelStatus.CLEANED.value,
+)
+
+
+RAW_TERMINAL_STATUSES = (
+    RawIntelStatus.ANALYZED.value,
+    RawIntelStatus.FAILED.value,
+    RawIntelStatus.DISCARDED.value,
+)
+
+
 class IntentLabel(str, Enum):
     FRAUD = "诈骗"
     TRAFFIC_DRIVEN = "引流"

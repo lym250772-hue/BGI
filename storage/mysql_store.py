@@ -16,8 +16,21 @@ import json as _json
 import pymysql
 import threading
 from contextlib import contextmanager
+from datetime import datetime
 from loguru import logger
 from config.settings import settings
+
+
+RAW_STATUSES = {
+    "RAW_COLLECTED",
+    "CLEANED",
+    "ANALYZING",
+    "ANALYZED",
+    "FAILED",
+    "DISCARDED",
+}
+
+RAW_PENDING_STATUSES = ("RAW_COLLECTED", "CLEANED")
 
 
 class MySQLStore:
@@ -448,6 +461,12 @@ class MySQLStore:
             "ALTER TABLE analysis_job MODIFY COLUMN error_message TEXT COMMENT '失败原因'",
             "ALTER TABLE analysis_job MODIFY COLUMN options JSON COMMENT '任务执行选项JSON'",
         ]
+        column_comments.append(
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN raw_status VARCHAR(32) "
+            "DEFAULT 'RAW_COLLECTED' COMMENT "
+            "'处理状态：RAW_COLLECTED待研判、CLEANED已清洗、"
+            "ANALYZING研判中、ANALYZED已研判、FAILED研判失败、DISCARDED已丢弃'"
+        )
         with self.cursor() as c:
             for table, comment in table_comments:
                 try:
@@ -491,21 +510,70 @@ class MySQLStore:
         item.setdefault("media_hash", item.get("image_hash"))
         item.setdefault("crawl_batch_id", item.get("crawl_batch_id"))
         item.setdefault("raw_status", item.get("status", "RAW_COLLECTED"))
+        item["raw_status"] = self._normalize_raw_status(item["raw_status"])
         metadata = item.get("metadata", {})
         item["metadata"] = metadata if isinstance(metadata, str) else _json.dumps(metadata, ensure_ascii=False)
         with self.cursor() as c:
             c.execute(sql, item)
             return c.lastrowid
 
+    @staticmethod
+    def _normalize_raw_status(status: str | None) -> str:
+        """Normalize legacy/lowercase statuses into the raw intelligence lifecycle."""
+        if not status:
+            return "RAW_COLLECTED"
+        value = str(status).strip()
+        legacy_map = {
+            "pending": "RAW_COLLECTED",
+            "raw": "RAW_COLLECTED",
+            "cleaned": "CLEANED",
+            "running": "ANALYZING",
+            "analyzing": "ANALYZING",
+            "success": "ANALYZED",
+            "analyzed": "ANALYZED",
+            "failed": "FAILED",
+            "discarded": "DISCARDED",
+        }
+        normalized = legacy_map.get(value.lower(), value.upper())
+        return normalized if normalized in RAW_STATUSES else "RAW_COLLECTED"
+
     def update_raw_status(self, raw_id: int, status: str,
                           clean_text: str = None, simhash: str = None):
         """Update ods_raw_intel status. If clean_text/simhash provided,
         also upsert into dwd_clean_intel."""
+        if not raw_id:
+            return
+        status = self._normalize_raw_status(status)
         with self.cursor() as c:
             c.execute("UPDATE ods_raw_intel SET raw_status=%s WHERE id=%s",
                       (status, raw_id))
         if clean_text or simhash:
             self.insert_clean_intel(raw_id, clean_text, simhash)
+
+    def mark_raw_analyzing(self, raw_id: int):
+        """Mark a raw intelligence row as being actively analyzed."""
+        if not raw_id:
+            return
+        self.update_raw_status(raw_id, "ANALYZING")
+
+    def mark_raw_failed(self, raw_id: int, error_message: str = ""):
+        """Mark analysis failure and keep a small audit note in metadata."""
+        if not raw_id:
+            return
+        failed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        error_text = (error_message or "")[:1000]
+        with self.cursor() as c:
+            c.execute(
+                """UPDATE ods_raw_intel
+                   SET raw_status='FAILED',
+                       metadata=JSON_SET(
+                           COALESCE(metadata, JSON_OBJECT()),
+                           '$.last_error', %s,
+                           '$.failed_at', %s
+                       )
+                   WHERE id=%s""",
+                (error_text, failed_at, raw_id),
+            )
 
     def list_raw(self, status: str = None, priority: str = None,
                  platform: str = None, limit: int = 100, offset: int = 0) -> list[dict]:
@@ -1277,6 +1345,10 @@ class MySQLStore:
             today_count = c.fetchone()["cnt"]
             c.execute("SELECT COUNT(*) as cnt FROM ods_raw_intel WHERE raw_status IN ('RAW_COLLECTED','CLEANED')")
             pending_count = c.fetchone()["cnt"]
+            c.execute("SELECT COUNT(*) as cnt FROM ods_raw_intel WHERE raw_status='ANALYZING'")
+            running_count = c.fetchone()["cnt"]
+            c.execute("SELECT COUNT(*) as cnt FROM ods_raw_intel WHERE raw_status='FAILED'")
+            failed_count = c.fetchone()["cnt"]
             c.execute(
                 """SELECT COUNT(*) as cnt FROM dwd_intel_analysis
                    WHERE is_latest=1 AND risk_level IN ('high','critical')"""
@@ -1308,6 +1380,8 @@ class MySQLStore:
         return {
             "today_count": today_count,
             "pending_count": pending_count,
+            "running_count": running_count,
+            "failed_count": failed_count,
             "high_risk_count": high_risk_count,
             "entity_count": entity_count,
             "label_distribution": label_distribution,

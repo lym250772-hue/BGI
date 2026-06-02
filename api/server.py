@@ -157,7 +157,9 @@ def agent_analyze(req: AnalyzeRequest):
     """
     opts = req.options or AnalyzeOptions()
     try:
+        from storage.mysql_store import mysql
         from analyzer.engine import engine
+        mysql.mark_raw_analyzing(req.raw_id)
         result = engine.run(
             raw_data_id=req.raw_id,
             text=req.text,
@@ -185,6 +187,11 @@ def agent_analyze(req: AnalyzeRequest):
         )
     except Exception as exc:
         logger.error(f"Agent analyze failed for raw_id={req.raw_id}: {exc}")
+        try:
+            from storage.mysql_store import mysql
+            mysql.mark_raw_failed(req.raw_id, str(exc))
+        except Exception as status_exc:
+            logger.warning(f"Failed to mark raw_id={req.raw_id} as FAILED: {status_exc}")
         raise HTTPException(
             status_code=500,
             detail=f"Agent analyze failed for raw_id={req.raw_id}: {exc}",

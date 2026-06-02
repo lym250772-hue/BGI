@@ -40,6 +40,7 @@ def submit_analysis(job_id: str, raw_id: int, text: str, platform: str = "unknow
 
     def _run():
         try:
+            mysql.mark_raw_analyzing(raw_id)
             mysql.update_job_status(job_id, status="running", progress=5, current_step="init")
 
             from analyzer.engine import engine
@@ -65,16 +66,17 @@ def submit_analysis(job_id: str, raw_id: int, text: str, platform: str = "unknow
                 if step.get("final"):
                     final_result = step.get("result")
 
-            if final_result:
-                mysql.update_job_status(job_id, status="success", progress=100,
-                                        current_step="done",
-                                        result_analysis_id=final_result.get("analysis_id"))
-            else:
-                mysql.update_job_status(job_id, status="success", progress=100,
-                                        current_step="done")
+            if not final_result:
+                raise RuntimeError("analysis stream finished without final result")
+
+            mysql.update_raw_status(raw_id, "ANALYZED")
+            mysql.update_job_status(job_id, status="success", progress=100,
+                                    current_step="done",
+                                    result_analysis_id=final_result.get("analysis_id"))
             logger.info(f"Job {job_id} completed: raw_id={raw_id}")
         except Exception as exc:
             logger.error(f"Job {job_id} failed: {exc}")
+            mysql.mark_raw_failed(raw_id, str(exc))
             mysql.update_job_status(job_id, status="failed", progress=0,
                                     current_step="error", error_message=str(exc))
 
