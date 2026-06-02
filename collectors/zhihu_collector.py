@@ -25,23 +25,19 @@ class ZhihuCollector(BaseCollector):
     def __init__(
         self,
         keywords: list[str],
-        max_pages_per_keyword: int = 3,
+        max_pages_per_keyword: int = 10,
+        max_items_per_keyword: int = 0,
         fetch_answers: bool = True,
         fetch_comments: bool = False,
+        incremental: bool = False,
         headless: bool = True,
     ):
-        """
-        Args:
-            keywords: 搜索关键词列表
-            max_pages_per_keyword: 每个关键词最多翻页数（每页20条）
-            fetch_answers: 是否拉取完整回答内容（需额外请求）
-            fetch_comments: 是否拉取回答的评论（会大幅增加请求量）
-            headless: 是否无头模式
-        """
         self.keywords = keywords
         self.max_pages = max_pages_per_keyword
+        self.max_items = max_items_per_keyword
         self.fetch_answers = fetch_answers
         self.fetch_comments = fetch_comments
+        self.incremental = incremental
         self.headless = headless
 
     def collect(self) -> Iterator[IntelItem]:
@@ -59,7 +55,12 @@ class ZhihuCollector(BaseCollector):
                 logger.info(f"开始采集知乎关键词: [{keyword}]")
                 parsed_items = spider.search_and_parse(
                     keyword, max_pages=self.max_pages,
+                    max_items=self.max_items,
+                    incremental=self.incremental,
                 )
+                # 非增量模式：清空增量状态，全量采集
+                if not self.incremental:
+                    spider._last_collected_at.pop(keyword, None)
                 for parsed in parsed_items:
                     yield self._to_intel_item(parsed)
 

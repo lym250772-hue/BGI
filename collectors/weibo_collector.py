@@ -1,4 +1,4 @@
-"""微博关键词搜索采集器 — 符合 BaseCollector 接口，产出 IntelItem。"""
+"""微博关键词搜索采集器 — 纯 AJAX API，符合 BaseCollector 接口，产出 IntelItem。"""
 
 from typing import Iterator, Optional
 from datetime import datetime
@@ -6,11 +6,11 @@ from datetime import datetime
 from loguru import logger
 
 from collectors.base import BaseCollector, IntelItem
-from collectors.spiders.weibo_spider import WeiboSearchSpider
+from collectors.spiders.weibo_api_spider import WeiboAPISpider
 
 
 class WeiboCollector(BaseCollector):
-    """微博关键词搜索采集器。
+    """微博关键词搜索采集器（AJAX API 模式，无需浏览器）。
 
     使用方式:
         collector = WeiboCollector(
@@ -25,44 +25,52 @@ class WeiboCollector(BaseCollector):
         self,
         keywords: list[str],
         max_pages_per_keyword: int = 3,
-        headless: bool = True,
+        count_per_page: int = 20,
+        fetch_comments: bool = False,
+        headless: bool = True,  # 保留兼容
     ):
         """
         Args:
             keywords: 搜索关键词列表
             max_pages_per_keyword: 每个关键词最多翻页数
-            headless: 是否无头模式（调试时可设为 False 看到浏览器操作）
+            count_per_page: 每页条数
+            fetch_comments: 是否同时获取评论
+            headless: 保留参数（API 模式不使用浏览器）
         """
         self.keywords = keywords
         self.max_pages = max_pages_per_keyword
-        self.headless = headless
+        self.count_per_page = count_per_page
+        self.fetch_comments = fetch_comments
 
     def collect(self) -> Iterator[IntelItem]:
         """执行采集，逐条产出 IntelItem。"""
-        spider: Optional[WeiboSearchSpider] = None
-        try:
-            spider = WeiboSearchSpider(headless=self.headless)
-            spider.start()
+        spider = WeiboAPISpider()
 
-            for keyword in self.keywords:
-                logger.info(f"开始采集关键词: [{keyword}]")
-                parsed_items = spider.search_and_parse(
-                    keyword, max_pages=self.max_pages
+        for keyword in self.keywords:
+            logger.info(f"开始采集关键词: [{keyword}]")
+            try:
+                parsed_items = spider.search(
+                    keyword,
+                    max_pages=self.max_pages,
+                    count=self.count_per_page,
                 )
-                for parsed in parsed_items:
-                    yield self._to_intel_item(parsed)
+            except Exception as exc:
+                logger.error(f"关键词 [{keyword}] 采集失败: {exc}")
+                continue
 
-                logger.info(f"关键词 [{keyword}] 采集完成，共 {len(parsed_items)} 条")
+            for parsed in parsed_items:
+                yield self._to_intel_item(parsed)
 
-        finally:
-            if spider:
-                spider.close()
+            logger.info(f"关键词 [{keyword}] 采集完成，共 {len(parsed_items)} 条")
+
+        # 关掉 session
+        spider._session.close()
 
     # ── 内部转换 ──────────────────────────────────────────────────────────
 
     @staticmethod
     def _to_intel_item(parsed) -> IntelItem:
-        """将 ParsedWeiboItem 转换为 IntelItem。"""
+        """将 ParsedWeiboAPIItem 转换为 IntelItem。"""
         return IntelItem(
             platform="weibo",
             content_raw=parsed.content_raw,
@@ -70,7 +78,7 @@ class WeiboCollector(BaseCollector):
             source_url=parsed.source_url,
             author_uid=parsed.author_uid,
             author_username=parsed.author_username,
-            group_id=parsed.keyword,  # 用搜索关键词作为分组标识
+            group_id=parsed.keyword,
             collected_at=parsed.collected_at,
             metadata={
                 "keyword": parsed.keyword,
@@ -78,5 +86,11 @@ class WeiboCollector(BaseCollector):
                 "has_image": parsed.metadata.get("has_image", False),
                 "has_video": parsed.metadata.get("has_video", False),
                 "is_long_text": parsed.metadata.get("is_long_text", False),
+                "reposts_count": parsed.reposts_count,
+                "comments_count": parsed.comments_count,
+                "attitudes_count": parsed.attitudes_count,
+                "source": parsed.metadata.get("source", ""),
+                "region_name": parsed.metadata.get("region_name", ""),
+                "fetch_method": "ajax_api",
             },
         )

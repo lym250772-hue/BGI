@@ -34,19 +34,21 @@ FINANCIAL_ENTITY_TYPES = {"bank_card", "alipay"}
 class RiskScorer:
     """Calculate multi-factor risk score for an intelligence item."""
 
-    # Weight configuration
+    # Weight configuration (v0.8: added metadata_signals)
     WEIGHTS = {
-        "classification_confidence": 0.50,   # base: how confident is the classifier?
-        "contact_entity": 0.15,              # has contact info?
-        "link_entity": 0.12,                 # has external links?
-        "tool_entity": 0.08,                 # mentions tools/scripts?
-        "high_risk_slang": 0.10,             # contains high-risk slang terms?
-        "graph_association": 0.05,           # connected to historical entities?
+        "classification_confidence": 0.45,   # base: how confident is the classifier?
+        "contact_entity": 0.14,              # has contact info?
+        "link_entity": 0.11,                 # has external links?
+        "tool_entity": 0.07,                 # mentions tools/scripts?
+        "high_risk_slang": 0.09,             # contains high-risk slang terms?
+        "graph_association": 0.04,           # connected to historical entities?
+        "metadata_signals": 0.10,            # (v0.8) metadata signals (hashtags, engagement)
     }
 
     def score(self, classification: dict, entities: list[dict],
               graph_result: dict = None,
-              slang_terms: list[dict] = None) -> dict:
+              slang_terms: list[dict] = None,
+              metadata_signals: dict = None) -> dict:
         """Calculate final risk score from multiple factors.
 
         Args:
@@ -54,13 +56,15 @@ class RiskScorer:
             entities: list of extracted entity dicts
             graph_result: {is_gang_related, related_entities_count, ...} or None
             slang_terms: list of detected slang terms or None
+            metadata_signals: {confidence_boost, signals, ...} or None (v0.8)
 
         Returns:
             {base_score, contact_bonus, link_bonus, tool_bonus, slang_bonus,
-             graph_bonus, final_score, risk_level, factors_explanation}
+             graph_bonus, metadata_bonus, final_score, risk_level, factors_explanation}
         """
         graph_result = graph_result or {}
         slang_terms = slang_terms or []
+        metadata_signals = metadata_signals or {}
 
         # --- Factor 1: Classification confidence (base) ---
         classification_conf = float(classification.get("confidence", 0.5))
@@ -127,10 +131,18 @@ class RiskScorer:
             )
             factors.append(f"图谱关联: +{graph_bonus:.2f} ({related_count}个关联实体)")
 
+        # --- Factor 7: Metadata signals bonus (v0.8) ---
+        metadata_bonus = 0.0
+        meta_boost = metadata_signals.get("confidence_boost", 0.0)
+        meta_signal_count = len(metadata_signals.get("signals", []))
+        if meta_boost > 0:
+            metadata_bonus = round(meta_boost * self.WEIGHTS["metadata_signals"], 4)
+            factors.append(f"Metadata信号: +{metadata_bonus:.2f} ({meta_signal_count}个信号)")
+
         # --- Final score ---
         final_score = round(
             base_score + contact_bonus + link_bonus + tool_bonus +
-            slang_bonus + graph_bonus, 4
+            slang_bonus + graph_bonus + metadata_bonus, 4
         )
         final_score = min(1.0, final_score)
 
@@ -151,6 +163,7 @@ class RiskScorer:
             "tool_bonus": tool_bonus,
             "slang_bonus": slang_bonus,
             "graph_bonus": graph_bonus,
+            "metadata_bonus": metadata_bonus,
             "final_score": final_score,
             "risk_level": risk_level,
             "factors": factors,

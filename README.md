@@ -4,7 +4,7 @@
 
 ## 核心能力
 
-- **多源采集** — Telegram 群组 / 贴吧 / 微博 / 知乎 / 小红书 / 论坛 多渠道情报采集
+- **多源采集** — Telegram 群组 / 贴吧 / 微博 / 知乎 / 小红书 / 抖音 / 论坛 多渠道情报采集
 - **智能清洗** — SimHash 去重 + HTML 清洗 + 噪声过滤 + 优先级标记
 - **三级分类** — L1 关键词规则 → L2 RoBERTa 微调 → L3 LLM 推理（7 大类 20 子类）
 - **实体抽取** — 正则 → 词典 → Embedding 向量检索 → LLM 结构化抽取四层级联
@@ -47,7 +47,21 @@ docker compose up -d
 pip install -r requirements.txt
 ```
 
-### 4. 配置 API Key
+### 4. 平台登录（一键交互式）
+
+```bash
+# 弹出浏览器 → 手动登录 → 按 Enter → 自动保存 Cookie
+python main.py login -p weibo        # 微博
+python main.py login -p zhihu        # 知乎
+python main.py login -p tieba        # 贴吧
+python main.py login -p xiaohongshu  # 小红书
+python main.py login -p douyin       # 抖音
+python main.py login -p all          # 依次登录全部平台
+```
+
+**不需要手动复制 Cookie！** 浏览器窗口会自动打开，你只需像平时一样扫码/输入密码登录，完成后回到终端按 Enter 键，Cookie 自动保存到 `data/raw/{platform}_cookies.json`。
+
+### 5. 配置 API Key
 
 ```bash
 cp .env.template .env
@@ -61,7 +75,7 @@ BGI_LLM_API_KEY=sk-your-key-here
 
 Telegram 采集可选（需从 https://my.telegram.org 获取 api_id 和 api_hash）。
 
-### 5. 初始化数据库
+### 6. 初始化数据库
 
 ```bash
 python main.py init-db
@@ -69,7 +83,7 @@ python main.py init-db
 
 自动创建 MySQL 表、Neo4j 约束、Milvus 集合，并加载 49 条种子黑话。
 
-### 6. 启动 Dashboard
+### 7. 启动 Dashboard
 
 ```bash
 python main.py ui
@@ -77,7 +91,7 @@ python main.py ui
 
 浏览器打开 http://localhost:8501
 
-### 7. 运行采集（可选，需 Telegram 凭证）
+### 8. 运行采集
 
 ```bash
 python main.py collect --platform telegram --tg-groups "group1,group2"
@@ -86,11 +100,14 @@ python main.py collect --platform telegram --tg-groups "group1,group2"
 ## 命令一览
 
 ```bash
+python main.py login -p <平台>           # 一键登录（浏览器弹窗 → 手动登录 → 自动保存Cookie）
 python main.py init-db                   # 初始化所有数据库
 python main.py collect -p telegram       # 采集情报
 python main.py collect -p tieba -k "刷单,接码" --max-pages 3    # 贴吧搜索采集
 python main.py collect -p zhihu -k "刷单,接码" --max-pages 2    # 知乎搜索采集
 python main.py collect -p weibo -k "刷单" --max-pages 1          # 微博搜索采集
+python main.py collect -p xiaohongshu -k "刷单" --max-pages 3   # 小红书搜索采集
+python main.py collect -p douyin -k "无人直播" --max-pages 2    # 抖音搜索采集
 python main.py clean -l 500              # 清洗去重
 python main.py analyze -l 200            # 分类 + 实体抽取
 python main.py run -l 500                # 全流程：collect → clean → analyze
@@ -186,11 +203,11 @@ BGI/
 | 平台 | 优先级 | 状态 | 采集量/页 | 技术要点 |
 |------|--------|:----:|:---------:|------|
 | 贴吧 | P0 | ✅ | 4~50条 | Playwright + BDUSS Cookie + Referer 绕过 |
-| 知乎 | P0 | ✅ | 10条 | JS Cookie 注入 + DOM 解析 SearchResult-Card |
+| 知乎 | P0 | ✅ | 10条 | API 直调 (`/api/v4/search_v3`) + DOM 兜底 |
 | 微博 | P1 | ✅ | 20条 | Cookie 登录 + UA 池轮换 |
+| 小红书 | P1 | ✅ | ~20条 | API 拦截 + DOM 兜底，支持标签/赞藏评提取 |
 | Telegram | P1 | ⚠️ | - | 需配置 API ID/Hash |
-| 小红书 | P1 | ⬜ | - | 待实现 |
-| 抖音 | P2 | ⬜ | - | 待研究 |
+| 抖音 | P2 | ✅ | ~15条 | page.evaluate(fetch) + SSR 数据 + DOM 三路解析 |
 | 垂直站点 | P2 | ⬜ | - | 待实现 |
 
 ## 运行测试

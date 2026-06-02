@@ -318,12 +318,8 @@ def inject_to_mysql(items: list[dict]) -> int:
                 "is_high_risk": item["priority"] in ("high", "critical"),
             })
 
-            # Update raw_data status to analyzed
-            with mysql.cursor() as c:
-                c.execute(
-                    "UPDATE raw_data SET status='analyzed' WHERE id=%s",
-                    (raw_id,),
-                )
+            # Update ods_raw_intel status to analyzed
+            mysql.update_raw_status(raw_id, "ANALYZED")
 
             # Insert entities
             for ent in item.get("entities", []):

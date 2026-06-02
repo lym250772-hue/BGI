@@ -1,5 +1,74 @@
 # BGI 开发指南
 
+## v0.8 更新（2026-06-02）— 新平台 + Emoji翻译 + Metadata增强 + 交互登录
+
+### 关键变化
+
+1. **小红书/抖音采集器** — 6平台全部打通(采集器+Spider+测试)，小红书API拦截+DOM兜底，抖音三路解析
+2. **交互式登录** — `python main.py login -p <平台>` 弹出浏览器手动登录自动保存Cookie
+3. **Emoji语义翻译** — `cleaner/emoji_translator.py` 120+条目词典，零API开销
+4. **平台感知噪声过滤** — 抖音2字emoji文本不再被丢弃，修复`\u`正则bug
+5. **Metadata增强分类** — L1.5 hashtag规则+播放量异常检测
+6. **风险评分 v0.8** — 新增metadata_signals因子权重0.10
+7. **异步OCR管道** — MediaBridge 图片下载+PaddleOCR+24h缓存
+8. **安全加固** — 根目录.gitignore，调试文件清理
+
+### 新增平台模板
+
+```bash
+# 小红书
+python main.py login -p xiaohongshu
+python main.py collect -p xiaohongshu -k "刷单,兼职" --max-pages 2
+
+# 抖音
+python main.py login -p douyin
+python main.py collect -p douyin -k "无人直播,刷单" --max-pages 2
+```
+
+---
+
+## v0.7 更新（2026-06-01）— 采集层重构 + 清洗过滤
+
+### 架构变化
+
+```
+采集层 (重构)
+├── spiders/base_spider.py    🆕 公共基类 (UA池/Cookie/重试/断点/拦截)
+├── spiders/zhihu_spider.py   ✏️ API直调模式
+├── spiders/tieba_spider.py   ✏️ DOM提取适配新版
+├── spiders/weibo_spider.py   ✏️ 继承基类
+├── collectors/base.py        🆕 IntelItem + BaseCollector
+├── collectors/registry.py    🆕 平台工厂映射
+└── data/grey_keywords.json   🆕 85 个灰黑产关键词
+
+清洗层 (增强)
+└── cleaner/pipeline.py       ✏️ 新增实体检测 + 风险判定过滤
+```
+
+### 关键变化
+
+1. **知乎改用 API 直调** — 不再解析 HTML，通过 `page.evaluate(fetch)` 调用 `/api/v4/search_v3`，不受页面改版影响
+2. **Cookie 管理标准化** — 统一使用 `data/raw/{platform}_cookies.json` 文件，EditThisCookie 格式自动转换
+3. **清洗层高危过滤** — 仅保留命中高危关键词或含可追溯实体的数据 (保留率 ~55%)
+4. **评论区关联** — 回答/评论嵌套存储于 `metadata.answers[].comments[]`，可通过 `raw_id` 追溯父帖
+
+### 快速开始 (更新)
+
+```bash
+# Cookie 配置 (新方式)
+# 1. Edge 安装 EditThisCookie 扩展
+# 2. 登录 zhihu.com / tieba.baidu.com
+# 3. 导出 JSON → 保存到 data/raw/{platform}_cookies.json
+
+# 批量采集
+python main.py collect -p zhihu --keyword-file data/grey_keywords.json --max-pages 5 --no-incremental
+
+# 清洗 (高危过滤)
+python main.py clean -l 5000
+```
+
+---
+
 ## v0.6 更新（2026-05-25）
 
 | 模块 | 变更 |

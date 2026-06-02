@@ -3,6 +3,7 @@
 
 Usage:
     python main.py init-db          # Initialize all databases
+    python main.py login -p PLATFORM # Interactive login (browser popup → manual login → auto-save cookies)
     python main.py collect          # Run collectors and save raw data
     python main.py clean            # Run cleaning pipeline on pending items
     python main.py analyze          # Run classification + entity extraction
@@ -67,6 +68,67 @@ def init_db():
     logger.info("All databases initialized!")
 
 
+# ============================================================================
+# login — interactive browser login, auto-save cookies
+# ============================================================================
+
+# 平台名 → Spider 类映射（用于 login 命令）
+_LOGIN_SPIDER_MAP: dict[str, type] = {}
+
+def _get_login_spider_map() -> dict[str, type]:
+    """懒加载平台→Spider映射，避免触发浏览器导入。"""
+    if _LOGIN_SPIDER_MAP:
+        return _LOGIN_SPIDER_MAP
+    from collectors.spiders.weibo_spider import WeiboSearchSpider
+    from collectors.spiders.tieba_spider import TiebaSpider
+    from collectors.spiders.zhihu_spider import ZhihuSearchSpider
+    from collectors.spiders.xiaohongshu_spider import XiaohongshuSearchSpider
+    from collectors.spiders.douyin_spider import DouyinSearchSpider
+    _LOGIN_SPIDER_MAP.update({
+        "weibo": WeiboSearchSpider,
+        "tieba": TiebaSpider,
+        "zhihu": ZhihuSearchSpider,
+        "xiaohongshu": XiaohongshuSearchSpider,
+        "douyin": DouyinSearchSpider,
+    })
+    return _LOGIN_SPIDER_MAP
+
+
+@cli.command()
+@click.option("--platform", "-p", required=True,
+              help="Platform: weibo / tieba / zhihu / xiaohongshu / douyin / all")
+@click.option("--headful/--headless", default=True,
+              help="Show browser window (default: --headful, required for manual login)")
+def login(platform: str, headful: bool):
+    """Interactive login: open browser → log in manually → auto-save cookies.
+
+    \b
+    Examples:
+        python main.py login -p weibo        # Login to Weibo
+        python main.py login -p zhihu        # Login to Zhihu
+        python main.py login -p xiaohongshu  # Login to Xiaohongshu
+        python main.py login -p douyin       # Login to Douyin
+        python main.py login -p all          # Login to all platforms one by one
+    """
+    spider_map = _get_login_spider_map()
+
+    if platform == "all":
+        platforms = list(spider_map.keys())
+        logger.info(f"将依次登录 {len(platforms)} 个平台: {', '.join(platforms)}")
+        for i, p in enumerate(platforms, 1):
+            logger.info(f"\n[{i}/{len(platforms)}] 登录 {p} ...")
+            spider_map[p].interactive_login(headless=not headful)
+        logger.info("\n全部平台登录完成！")
+        return
+
+    if platform not in spider_map:
+        available = ", ".join(spider_map.keys())
+        logger.error(f"未知平台 '{platform}'。可选: {available}, all")
+        return
+
+    spider_map[platform].interactive_login(headless=not headful)
+
+
 def _normalize_status():
     """Convert legacy lowercase statuses to PROJECT_PLAN uppercase format."""
     from storage.mysql_store import mysql
@@ -109,39 +171,118 @@ def _load_seed_slang():
 @click.option("--platform", "-p", default="telegram", help="Platform to collect from")
 @click.option("--tg-groups", default="", help="Comma-separated Telegram group usernames")
 @click.option("--keywords", "-k", default="", help="Comma-separated search keywords")
-@click.option("--max-pages", default=3, help="Max pages per keyword")
-@click.option("--fetch-replies/--no-fetch-replies", default=True, help="Fetch post replies")
-def collect(platform: str, tg_groups: str, keywords: str, max_pages: int, fetch_replies: bool):
-    """Run data collectors and save to ods_raw_intel."""
+@click.option("--keyword-file", default="", help="JSON keyword file path (e.g. data/grey_keywords.json)")
+@click.option("--max-pages", default=10, help="Max pages per keyword (0 = auto, collect until empty)")
+@click.option("--max-items", default=0, help="Max items per keyword (0 = unlimited)")
+@click.option("--fetch-replies/--no-fetch-replies", default=True, help="Fetch post replies/comments")
+@click.option("--incremental/--no-incremental", default=False, help="Incremental collection (skip previously collected)")
+@click.option("--batch-size", default=100, help="Items per batch insert")
+def collect(platform: str, tg_groups: str, keywords: str, keyword_file: str,
+            max_pages: int, max_items: int, fetch_replies: bool,
+            incremental: bool, batch_size: int):
+    """Run data collectors and save to ods_raw_intel (batch insert)."""
     from collectors.registry import get_collector
     from storage.mysql_store import mysql
-    import json as _json
+    from collectors.spiders.base_spider import BaseSpider
+    import json as _json, time as _time
+
+    # 检查 Cookie 是否存在
+    if platform in ("weibo", "tieba", "zhihu", "xiaohongshu", "douyin"):
+        cookies = BaseSpider.load_cookies(platform)
+        if not cookies:
+            logger.warning(f"  ⚠️  {platform} 未配置 Cookie！")
+            logger.warning(f"  请先运行: python main.py login -p {platform}")
+            logger.warning(f"  或在 data/raw/{platform}_cookies.json 放置 Cookie 文件")
+            logger.warning(f"  继续尝试采集（可能失败）...")
+            logger.info("")
+
+    # 解析关键词: 命令行 > 文件兜底
+    kw_list = []
+    if keywords:
+        kw_list = [k.strip() for k in keywords.split(",") if k.strip()]
+    if not kw_list and keyword_file:
+        try:
+            with open(keyword_file, "r", encoding="utf-8") as f:
+                kw_data = _json.load(f)
+            if isinstance(kw_data, dict):
+                # 优先用 quick_keywords，否则合并所有分类
+                kw_list = kw_data.get("quick_keywords", [])
+                if not kw_list:
+                    for cat, kws in kw_data.get("keywords", {}).items():
+                        kw_list.extend(kws)
+            elif isinstance(kw_data, list):
+                kw_list = kw_data
+        except Exception as exc:
+            logger.error(f"Failed to load keyword file: {exc}")
+    if not kw_list:
+        logger.error("No keywords specified. Use --keywords or --keyword-file")
+        return
+
+    logger.info(f"关键词列表 ({len(kw_list)}): {', '.join(kw_list[:10])}{'...' if len(kw_list) > 10 else ''}")
 
     kwargs = {}
     if platform == "telegram" and tg_groups:
         kwargs["group_usernames"] = [g.strip() for g in tg_groups.split(",")]
-    elif platform == "weibo" and keywords:
-        kwargs["keywords"] = [k.strip() for k in keywords.split(",")]
+    elif platform == "weibo":
+        kwargs["keywords"] = kw_list
         kwargs["max_pages_per_keyword"] = max_pages
-    elif platform in ("tieba", "zhihu") and keywords:
-        kwargs["keywords"] = [k.strip() for k in keywords.split(",")]
+    elif platform in ("tieba", "zhihu"):
+        kwargs["keywords"] = kw_list
         kwargs["max_pages_per_keyword"] = max_pages
+        kwargs["max_items_per_keyword"] = max_items
         kwargs["fetch_replies"] = fetch_replies
-    elif platform in ("xiaohongshu", "forum"):
-        kwargs["urls"] = keywords.split(",") if keywords else (tg_groups.split(",") if tg_groups else [])
+        kwargs["fetch_answers"] = fetch_replies  # zhihu: answers = replies
+        kwargs["fetch_comments"] = fetch_replies  # zhihu: comments = replies
+        kwargs["incremental"] = incremental
+    elif platform in ("xiaohongshu", "douyin"):
+        kwargs["keywords"] = kw_list
+        kwargs["max_pages_per_keyword"] = max_pages
+        kwargs["max_items_per_keyword"] = max_items
+    elif platform == "forum":
+        kwargs["urls"] = kw_list
 
+    t_start = _time.time()
     collector = get_collector(platform, **kwargs)
-    count = 0
+    batch, total, errors = [], 0, 0
+
+    def flush_batch():
+        """将累积的批次一次性写入 MySQL。"""
+        nonlocal errors
+        if not batch:
+            return
+        try:
+            with mysql.cursor() as c:
+                sql = """INSERT INTO ods_raw_intel
+                    (source_platform, source_channel, source_url, source_keyword,
+                     author_id, author_name, publish_time, collect_time,
+                     content_type, content_raw, media_urls, media_hash,
+                     crawl_batch_id, raw_status, metadata)
+                    VALUES (%(source_platform)s, %(source_channel)s, %(source_url)s, %(source_keyword)s,
+                            %(author_id)s, %(author_name)s, %(publish_time)s, %(collect_time)s,
+                            %(content_type)s, %(content_raw)s, %(media_urls)s, %(media_hash)s,
+                            %(crawl_batch_id)s, %(raw_status)s, %(metadata)s)"""
+                c.executemany(sql, batch)
+        except Exception as exc:
+            logger.error(f"Batch insert failed: {exc}")
+            errors += len(batch)
+        batch.clear()
+
     for item in collector.collect():
-        mysql.insert_raw({
+        batch.append({
             "source_platform": item.platform,
             "source_url": item.source_url,
+            "source_channel": item.group_id,
+            "source_keyword": item.metadata.get("keyword", ""),
             "author_id": item.author_uid,
             "author_name": item.author_username,
             "content_type": item.content_type,
             "content_raw": item.content_raw,
-            "raw_status": STATUS_PENDING,
+            "publish_time": item.collected_at,
             "collect_time": item.collected_at,
+            "raw_status": STATUS_PENDING,
+            "media_urls": _json.dumps([]),
+            "media_hash": "",
+            "crawl_batch_id": "",
             "metadata": _json.dumps(
                 {**item.metadata,
                  "group_id": item.group_id,
@@ -149,10 +290,18 @@ def collect(platform: str, tg_groups: str, keywords: str, max_pages: int, fetch_
                 ensure_ascii=False, default=str,
             ),
         })
-        count += 1
-        if count % 10 == 0:
-            logger.info(f"Collected {count} items...")
-    logger.info(f"Collection complete: {count} items from {platform}")
+        total += 1
+        if len(batch) >= batch_size:
+            flush_batch()
+            logger.info(f"Collected {total} items...")
+
+    flush_batch()  # final flush
+    elapsed = _time.time() - t_start
+    rate = total / elapsed if elapsed > 0 else 0
+    logger.info(
+        f"Collection complete: {total} items from {platform} "
+        f"({elapsed:.1f}s, {rate:.1f} items/s, {errors} errors)"
+    )
 
 
 # ============================================================================
@@ -165,23 +314,55 @@ def clean(limit: int):
     """Run cleaning pipeline on raw intel."""
     from cleaner.pipeline import CleaningPipeline
     from storage.mysql_store import mysql
+    import json as _json
 
     pipeline = CleaningPipeline()
+
+    # Fetch existing simhashes for dedup
+    existing_hashes = []
+    try:
+        with mysql.cursor() as c:
+            c.execute("SELECT simhash FROM dwd_clean_intel WHERE simhash IS NOT NULL")
+            existing_hashes = [r["simhash"] for r in c.fetchall()]
+        logger.info(f"Loaded {len(existing_hashes)} existing hashes for dedup")
+    except Exception:
+        pass
+
     pending = mysql.list_raw(status=STATUS_PENDING, limit=limit)
 
     cleaned, discarded = 0, 0
     for item in pending:
         text = item.get("content_raw", "")
-        result = pipeline.process(text)
+        platform = item.get("source_platform", "")
+        # 解析 metadata JSON（可能是字符串或已解析的 dict）
+        metadata_raw = item.get("metadata", {})
+        if isinstance(metadata_raw, str):
+            try:
+                metadata = _json.loads(metadata_raw)
+            except Exception:
+                metadata = {}
+        else:
+            metadata = metadata_raw
+
+        result = pipeline.process(text, existing_hashes,
+                                  platform=platform, metadata=metadata)
+        noise_score = result.get("noise_score", 0.0)
         if result["should_discard"]:
             mysql.update_raw_status(item["id"], STATUS_DISCARDED,
-                                    clean_text=result["text"])
+                                    clean_text=result["text"],
+                                    simhash=result["simhash"],
+                                    priority=result["priority"],
+                                    noise_score=noise_score,
+                                    clean_reason=result.get("discard_reason", ""))
             discarded += 1
         else:
             mysql.update_raw_status(
                 item["id"], STATUS_CLEANED,
                 clean_text=result["text"],
                 simhash=result["simhash"],
+                priority=result["priority"],
+                noise_score=noise_score,
+                clean_reason=f"risk:{result.get('risk_reason','')}" if result.get('risk_reason') else "",
             )
             cleaned += 1
 
@@ -189,6 +370,23 @@ def clean(limit: int):
             logger.info(f"Cleaned {cleaned + discarded} items...")
 
     logger.info(f"Cleaning complete: {cleaned} kept, {discarded} discarded")
+
+
+# ============================================================================
+# ocr — extract text from images (XHS/Douyin)
+# ============================================================================
+
+@cli.command()
+@click.option("--limit", "-l", default=100, help="Max items to process")
+@click.option("--platform", "-p", default="douyin,xiaohongshu",
+              help="Platforms to OCR (comma-separated)")
+def ocr(limit: int, platform: str):
+    """Run OCR on images from collected data (XHS notes, Douyin covers)."""
+    from cleaner.media_bridge import media_bridge
+    platforms = [p.strip() for p in platform.split(",") if p.strip()]
+    logger.info(f"开始 OCR 处理: limit={limit}, platforms={platforms}")
+    count = media_bridge.process_pending(limit=limit, platforms=platforms)
+    logger.info(f"OCR 完成: {count} 条已处理")
 
 
 # ============================================================================
@@ -209,7 +407,8 @@ def analyze(limit: int):
 
     analyzed = 0
     for item in items:
-        text = item.get("content_raw", "")
+        # Prefer clean_text from dwd_clean_intel, fall back to content_raw
+        text = item.get("clean_text") or item.get("content_raw", "")
         if not text or not text.strip():
             continue
         try:

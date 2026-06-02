@@ -251,6 +251,7 @@ class MySQLStore:
                 %(content_type)s, %(content_raw)s, %(media_urls)s, %(media_hash)s,
                 %(crawl_batch_id)s, %(raw_status)s, %(metadata)s)"""
         # Map old field names for backward compatibility
+        item.setdefault("source_url", item.get("source_url"))
         item.setdefault("source_channel", item.get("source_channel"))
         item.setdefault("source_keyword", item.get("source_keyword"))
         item.setdefault("author_id", item.get("author_uid"))
@@ -267,14 +268,18 @@ class MySQLStore:
             return c.lastrowid
 
     def update_raw_status(self, raw_id: int, status: str,
-                          clean_text: str = None, simhash: str = None):
+                          clean_text: str = None, simhash: str = None,
+                          priority: str = None, noise_score: float = None,
+                          clean_reason: str = None):
         """Update ods_raw_intel status. If clean_text/simhash provided,
         also upsert into dwd_clean_intel."""
         with self.cursor() as c:
             c.execute("UPDATE ods_raw_intel SET raw_status=%s WHERE id=%s",
                       (status, raw_id))
         if clean_text or simhash:
-            self.insert_clean_intel(raw_id, clean_text, simhash)
+            self.insert_clean_intel(raw_id, clean_text, simhash,
+                                    priority=priority, noise_score=noise_score,
+                                    clean_reason=clean_reason)
 
     def list_raw(self, status: str = None, priority: str = None,
                  platform: str = None, limit: int = 100, offset: int = 0) -> list[dict]:
@@ -290,7 +295,12 @@ class MySQLStore:
         params.extend([limit, offset])
         with self.cursor() as c:
             c.execute(
-                f"SELECT * FROM ods_raw_intel {clause} ORDER BY collect_time DESC LIMIT %s OFFSET %s",
+                f"""SELECT o.*, d.clean_text, d.simhash as clean_simhash,
+                           d.priority as clean_priority, d.noise_score
+                    FROM ods_raw_intel o
+                    LEFT JOIN dwd_clean_intel d ON d.raw_id = o.id
+                    {clause}
+                    ORDER BY o.collect_time DESC LIMIT %s OFFSET %s""",
                 params,
             )
             rows = c.fetchall()
@@ -321,7 +331,9 @@ class MySQLStore:
     # ==================================================================
 
     def insert_clean_intel(self, raw_id: int, clean_text: str = None,
-                           simhash: str = None, **kwargs):
+                           simhash: str = None, priority: str = None,
+                           noise_score: float = None, clean_reason: str = None,
+                           **kwargs):
         """Upsert into dwd_clean_intel."""
         with self.cursor() as c:
             c.execute("SELECT id FROM dwd_clean_intel WHERE raw_id=%s", (raw_id,))
@@ -333,16 +345,25 @@ class MySQLStore:
                     sets.append("clean_text=%s"); params.append(clean_text)
                 if simhash:
                     sets.append("simhash=%s"); params.append(simhash)
+                if priority:
+                    sets.append("priority=%s"); params.append(priority)
+                if noise_score is not None:
+                    sets.append("noise_score=%s"); params.append(noise_score)
+                if clean_reason:
+                    sets.append("clean_reason=%s"); params.append(clean_reason)
                 if sets:
                     params.append(raw_id)
                     c.execute(f"UPDATE dwd_clean_intel SET {', '.join(sets)} WHERE raw_id=%s", params)
                 return existing["id"]
             else:
                 c.execute(
-                    """INSERT INTO dwd_clean_intel (raw_id, clean_text, simhash, clean_status)
-                    VALUES (%s, %s, %s, 'CLEANED')""",
-                    (raw_id, clean_text, simhash),
+                    """INSERT INTO dwd_clean_intel
+                       (raw_id, clean_text, simhash, priority, noise_score, clean_reason, clean_status)
+                       VALUES (%s, %s, %s, %s, %s, %s, 'CLEANED')""",
+                    (raw_id, clean_text, simhash, priority or "normal",
+                     noise_score or 0.0, clean_reason or ""),
                 )
+                return c.lastrowid
                 return c.lastrowid
 
     # ==================================================================
