@@ -166,10 +166,12 @@ class XiaohongshuSearchSpider(BaseSpider):
 
         max_items = kwargs.get("max_items", 0)
         use_incremental = kwargs.get("incremental", False)
+        start_page = kwargs.get("start_page", 1)
+        checkpoint_cb = kwargs.get("checkpoint_callback")
         all_items = []
         consecutive_empty = 0
 
-        for page_num in range(1, max_pages + 1):
+        for page_num in range(start_page, max_pages + 1):
             logger.info(f"搜索 [{keyword}] 第{page_num}/{max_pages}页")
 
             try:
@@ -234,6 +236,9 @@ class XiaohongshuSearchSpider(BaseSpider):
                 continue
             finally:
                 self._api_capture_enabled = False
+
+            if checkpoint_cb:
+                checkpoint_cb(keyword, page_num, len(all_items))
 
             self._adaptive_delay(consecutive_empty)
 

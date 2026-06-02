@@ -1,5 +1,62 @@
 # BGI 变更日志
 
+## 2026-06-02 — 大规模多通道并发采集 + 知乎API加速 + 评论采集 + 图文存储 (v2.0)
+
+### 🆕 并发编排引擎
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/orchestrator.py` | 多通道并发编排器 — 每平台独立线程并行，RateLimiter令牌桶限速，ProgressTracker实时统计，SIGINT优雅停机+断点保存 |
+| `storage/write_pipeline.py` | 生产者-消费者写入管道 — Queue背压，单consumer线程批量INSERT，失败自动重试（指数退避） |
+| `main.py collect-all` 命令 | `python main.py collect-all -k "刷单,接码" --max-pages 3` 一键全通道并发 |
+
+### 🆕 知乎纯 HTTP API Spider
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/spiders/zhihu_api_spider.py` | 纯 requests 知乎采集 — 搜索+答案+评论三合一，3-5条/秒（15-25x提升），零浏览器开销 |
+| orchestrator 集成 | 知乎自动走 HTTP 通道，不再启动 Playwright |
+
+### 🆕 评论/回复采集
+
+| 平台 | 状态 | 说明 |
+|------|:--:|------|
+| 微博 | ✅ | `get_comments()` 已接入collector，评论生成独立 IntelItem (content_type="comment") |
+| 知乎 | ✅ | ZhihuAPISpider 内置 `get_comments()`，评论嵌套在 metadata.answers[].comments |
+| 贴吧 | ✅ | `_fetch_thread_detail()` 已在 fetch_replies 模式下工作 |
+| 小红书 | ❌ | 需 X-s/X-t 签名，当前仅记录 comment_count |
+| 抖音 | ❌ | 需 msToken/Bogus 签名 |
+
+### 🆕 图文数据采集 & 存储
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/base.py` | IntelItem 新增 `image_urls` + `video_cover_url` 字段 |
+| `collectors/orchestrator.py` | `_parsed_to_dict()` 修复 `media_urls` 永远为空的 BUG，新增 `_collect_media_urls()` + `_compute_media_hash()` |
+| `collectors/spiders/douyin_spider.py` | `ParsedDouyinItem` 新增 `image_list`，图集图片 URL 不再丢弃 |
+| `storage/media_store.py` | 图片下载+持久存储 — 线程池并发下载，MD5去重，自动格式检测，`data/images/{platform}/{raw_id}/` |
+
+### 🔧 断点续采接入
+
+| 文件 | 说明 |
+|------|------|
+| `tieba_spider.py` | 接入 `start_page` + `checkpoint_callback`，支持中断恢复 |
+| `zhihu_spider.py` | 同上（while循环模式）|
+| `xiaohongshu_spider.py` | 同上（for循环模式）|
+| `douyin_spider.py` | 同上（首页导航模式，关键词级恢复）|
+
+### 📄 文档 & 示例
+
+| 变更 | 说明 |
+|------|------|
+| `docs/操作手册.md` | 完全重写 — 全通道采集/完整工作流/命令速查/故障排查 |
+| `docs/数据采集层技术文档.md` | v3.0 更新 — 新架构图/渠道矩阵/并发引擎/图片管道 |
+| `examples/` | 5平台72+条真实黑灰产样本（微博75/知乎39/小红书80/抖音44/贴吧8） |
+| `scripts/collect_examples.py` | 一键样本采集脚本 |
+| `examples/README.md` | 数据格式说明 + 重新采集指南 |
+
+---
+
 ## 2026-06-02 — 小红书/抖音采集器 + Emoji翻译 + Metadata增强 + 交互式登录
 
 ### 🆕 新增平台

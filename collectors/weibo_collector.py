@@ -43,7 +43,7 @@ class WeiboCollector(BaseCollector):
         self.fetch_comments = fetch_comments
 
     def collect(self) -> Iterator[IntelItem]:
-        """执行采集，逐条产出 IntelItem。"""
+        """执行采集，逐条产出 IntelItem（含评论）。"""
         spider = WeiboAPISpider()
 
         for keyword in self.keywords:
@@ -59,9 +59,40 @@ class WeiboCollector(BaseCollector):
                 continue
 
             for parsed in parsed_items:
-                yield self._to_intel_item(parsed)
+                # 获取评论
+                comments = []
+                if self.fetch_comments and parsed.comments_count > 0:
+                    try:
+                        comments = spider.get_comments(parsed.weibo_id, max_pages=2)
+                    except Exception:
+                        pass
+                yield self._to_intel_item(parsed, comments)
 
-            logger.info(f"关键词 [{keyword}] 采集完成，共 {len(parsed_items)} 条")
+                # 每条评论作为独立 IntelItem（供分析管道使用）
+                for c in comments:
+                    yield IntelItem(
+                        platform="weibo",
+                        content_raw=c.get("text_raw", "") or c.get("text", ""),
+                        content_type="comment",
+                        source_url=f"{parsed.source_url}#comment_{c.get('id', '')}",
+                        author_uid=str(c.get("user", {}).get("id", "")),
+                        author_username=c.get("user", {}).get("screen_name", ""),
+                        group_id=parsed.keyword,
+                        collected_at=datetime.utcnow(),
+                        metadata={
+                            "keyword": parsed.keyword,
+                            "weibo_id": parsed.weibo_id,
+                            "parent_id": parsed.weibo_id,
+                            "comment_id": str(c.get("id", "")),
+                            "like_count": c.get("like_counts", 0) or c.get("like_count", 0),
+                            "fetch_method": "ajax_api",
+                        },
+                    )
+
+            logger.info(
+                f"关键词 [{keyword}] 采集完成，共 {len(parsed_items)} 条"
+                f"（含评论）"
+            )
 
         # 关掉 session
         spider._session.close()
@@ -69,8 +100,29 @@ class WeiboCollector(BaseCollector):
     # ── 内部转换 ──────────────────────────────────────────────────────────
 
     @staticmethod
-    def _to_intel_item(parsed) -> IntelItem:
-        """将 ParsedWeiboAPIItem 转换为 IntelItem。"""
+    def _to_intel_item(parsed, comments: list | None = None) -> IntelItem:
+        """将 ParsedWeiboAPIItem 转换为 IntelItem（可选附加评论数据）。"""
+        meta = {
+            "keyword": parsed.keyword,
+            "weibo_id": parsed.weibo_id,
+            "has_image": parsed.metadata.get("has_image", False),
+            "has_video": parsed.metadata.get("has_video", False),
+            "is_long_text": parsed.metadata.get("is_long_text", False),
+            "reposts_count": parsed.reposts_count,
+            "comments_count": parsed.comments_count,
+            "attitudes_count": parsed.attitudes_count,
+            "source": parsed.metadata.get("source", ""),
+            "region_name": parsed.metadata.get("region_name", ""),
+            "fetch_method": "ajax_api",
+        }
+        if comments:
+            meta["comments"] = [{
+                "id": c.get("id", ""),
+                "author": c.get("user", {}).get("screen_name", ""),
+                "text": c.get("text_raw", "") or c.get("text", ""),
+                "like_count": c.get("like_counts", 0) or c.get("like_count", 0),
+                "created_at": c.get("created_at", ""),
+            } for c in comments]
         return IntelItem(
             platform="weibo",
             content_raw=parsed.content_raw,
@@ -80,17 +132,5 @@ class WeiboCollector(BaseCollector):
             author_username=parsed.author_username,
             group_id=parsed.keyword,
             collected_at=parsed.collected_at,
-            metadata={
-                "keyword": parsed.keyword,
-                "weibo_id": parsed.weibo_id,
-                "has_image": parsed.metadata.get("has_image", False),
-                "has_video": parsed.metadata.get("has_video", False),
-                "is_long_text": parsed.metadata.get("is_long_text", False),
-                "reposts_count": parsed.reposts_count,
-                "comments_count": parsed.comments_count,
-                "attitudes_count": parsed.attitudes_count,
-                "source": parsed.metadata.get("source", ""),
-                "region_name": parsed.metadata.get("region_name", ""),
-                "fetch_method": "ajax_api",
-            },
+            metadata=meta,
         )

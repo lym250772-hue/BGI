@@ -48,6 +48,12 @@ class IntelItem:
     telegram: {group_id, message_id, has_image, has_video, is_long_text}
     """
 
+    # ── 媒体 ──
+    image_urls: list[str] = field(default_factory=list)
+    """图片链接列表（小红书图集、抖音封面等）"""
+    video_cover_url: str = ""
+    """视频封面链接（抖音等）"""
+
 
 class BaseCollector(ABC):
     """采集器抽象基类。

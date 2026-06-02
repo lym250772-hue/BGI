@@ -60,6 +60,7 @@ class ParsedDouyinItem:
     duration: int = 0             # 视频时长（秒）
     hashtags: list[str] = field(default_factory=list)
     video_cover_url: str = ""
+    image_list: list[str] = field(default_factory=list)  # 图集图片 URL
     metadata: dict = field(default_factory=dict)
 
 
@@ -236,11 +237,14 @@ class DouyinSearchSpider(BaseSpider):
 
         max_items = kwargs.get("max_items", 0)
         use_incremental = kwargs.get("incremental", False)
+        start_page = kwargs.get("start_page", 1)
+        checkpoint_cb = kwargs.get("checkpoint_callback")
         all_items = []
         consecutive_empty = 0
 
         # 首页建立会话 + 通过搜索框触发搜索（绕过直接/search/ URL的验证码）
-        for page_num in range(1, max_pages + 1):
+        # 注意：抖音首页导航流程特殊，断点仅支持关键词级恢复，不支持中间页跳转
+        for page_num in range(start_page, max_pages + 1):
             logger.info(f"搜索 [{keyword}] 第{page_num}/{max_pages}页")
 
             try:
@@ -279,6 +283,9 @@ class DouyinSearchSpider(BaseSpider):
                 self.stats["errors"] += 1
                 time.sleep(3.0 + random.random() * 2.0)
                 continue
+
+            if checkpoint_cb:
+                checkpoint_cb(keyword, page_num, len(all_items))
 
             self._adaptive_delay(consecutive_empty)
 
@@ -672,10 +679,19 @@ class DouyinSearchSpider(BaseSpider):
 
         # 图片集（图集类型）
         images = aweme.get("images", []) or aweme.get("image_infos", []) or []
+        image_urls = []
+        if images:
+            for img in images:
+                if isinstance(img, dict):
+                    urls = img.get("url_list", []) or img.get("urlList", [])
+                    if urls and isinstance(urls, list):
+                        image_urls.append(urls[0])
+                    elif isinstance(urls, str):
+                        image_urls.append(urls)
 
         # 内容类型
         content_type = "video"
-        if images:
+        if image_urls:
             content_type = "image"
         elif aweme.get("media_type", 0) == 4:
             content_type = "image"
@@ -712,11 +728,13 @@ class DouyinSearchSpider(BaseSpider):
             duration=duration,
             hashtags=hashtags,
             video_cover_url=cover_url,
+            image_list=image_urls,
             metadata={
                 "keyword": keyword,
                 "aweme_id": aweme_id,
                 "hashtags": hashtags,
-                "has_image": bool(images),
+                "image_list": image_urls,
+                "has_image": bool(image_urls),
                 "has_video": content_type == "video",
                 "has_emoji": self.contains_emoji(desc),
                 "like_count": int(statistics.get("digg_count", 0) or statistics.get("diggCount", 0)),

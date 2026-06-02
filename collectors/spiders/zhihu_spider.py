@@ -62,10 +62,12 @@ class ZhihuSearchSpider(BaseSpider):
 
         max_items = kwargs.get("max_items", 0)
         use_incremental = kwargs.get("incremental", False)
+        start_page = kwargs.get("start_page", 1)
+        checkpoint_cb = kwargs.get("checkpoint_callback")
         all_items = []
         consecutive_empty = 0
 
-        page_num = 0
+        page_num = start_page - 1
         while True:
             page_num += 1
             if max_pages > 0 and page_num > max_pages:
@@ -130,6 +132,9 @@ class ZhihuSearchSpider(BaseSpider):
                 self.stats["errors"] += 1
                 time.sleep(3.0 + random.random() * 3.0)  # 错误后退避
                 continue
+
+            if checkpoint_cb:
+                checkpoint_cb(keyword, page_num, len(all_items))
 
             self._adaptive_delay(consecutive_empty)
 
