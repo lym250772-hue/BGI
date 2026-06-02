@@ -60,10 +60,16 @@ class GraphAgent:
         related_tools = set()
 
         for record in raw:
-            node = record.get("related", {})
-            labels = node.get("labels", []) if isinstance(node, dict) else []
-            # Handle Neo4j node dict format
-            node_data = node if isinstance(node, dict) else {}
+            node = record.get("related")
+            if node is None:
+                continue
+            # Handle Neo4j Node object (not dict)
+            try:
+                labels = list(node.labels)
+                node_data = dict(node)
+            except AttributeError:
+                labels = node.get("labels", []) if isinstance(node, dict) else []
+                node_data = node if isinstance(node, dict) else {}
 
             if "Intel" in str(labels):
                 rid = node_data.get("raw_id", "")
@@ -148,8 +154,8 @@ class GraphAgent:
             evalue = ent.get("entity_value", "")
 
             # Only expand contacts and accounts (not features, slang)
-            if etype_str in ("wechat", "qq", "phone", "url", "domain",
-                             "bank_card", "alipay", "tool"):
+            if etype_str in ("wechat", "qq", "telegram", "phone", "url", "domain",
+                             "bank_card", "alipay", "tool", "crypto_wallet"):
                 expansion = self.expand_entity(etype_str, evalue, depth=2)
                 expansions.append(expansion)
                 for c in expansion.get("related_contacts", []):

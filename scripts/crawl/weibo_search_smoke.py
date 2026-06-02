@@ -1,12 +1,12 @@
 """
 微博关键词搜索功能测试
-用法: python tests/test_weibo_search.py
-      python tests/test_weibo_search.py 刷单 2    # 自定义关键词和页数
+用法: python scripts/crawl/weibo_search_smoke.py
+      python scripts/crawl/weibo_search_smoke.py 刷单 2
 """
 import sys
 import re
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # 强制 UTF-8 输出，避免 Windows GBK 终端乱码
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore

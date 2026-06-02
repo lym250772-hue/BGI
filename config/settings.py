@@ -1,18 +1,31 @@
 """Global settings for BGI Intelligence Analysis Agent."""
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=PROJECT_ROOT / ".env",
+        env_prefix="BGI_",
+    )
+
     # --- MySQL ---
     mysql_host: str = "localhost"
     mysql_port: int = 3306
     mysql_user: str = "bagi"
     mysql_password: str = "bagi2026pass"
     mysql_database: str = "bagi_intel"
+
+    # --- Apache Doris (OLAP) ---
+    doris_host: str = "localhost"
+    doris_port: int = 9030
+    doris_user: str = "root"
+    doris_password: str = ""
+    doris_database: str = "bagi_olap"
+    doris_enabled: bool = False
 
     # --- Neo4j ---
     neo4j_uri: str = "bolt://localhost:7687"
@@ -48,7 +61,7 @@ class Settings(BaseSettings):
     # --- Classification ---
     roberta_model_path: str = str(DATA_DIR / "models" / "roberta_classifier")
     classification_confidence_threshold: float = 0.7
-    embedding_model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    embedding_model_name: str = str(DATA_DIR / "models" / "paraphrase-multilingual-MiniLM-L12-v2")
     slang_similarity_threshold: float = 0.75
 
     # --- Paths ---
@@ -56,10 +69,6 @@ class Settings(BaseSettings):
     cleaned_data_dir: Path = DATA_DIR / "cleaned"
     models_dir: Path = DATA_DIR / "models"
     slang_dict_path: Path = DATA_DIR / "slang_dict"
-
-    class Config:
-        env_file = PROJECT_ROOT / ".env"
-        env_prefix = "BGI_"
 
 
 settings = Settings()

@@ -22,9 +22,9 @@ PROJECT_PLAN.md Section 1.1 schema:
     }
 
 Usage:
-    python scripts/import_partner_jsonl.py partner_data.jsonl
-    python scripts/import_partner_jsonl.py partner_data.jsonl --dry-run
-    python scripts/import_partner_jsonl.py partner_data.jsonl --status RAW_COLLECTED
+    python scripts/importers/import_partner_jsonl.py partner_data.jsonl
+    python scripts/importers/import_partner_jsonl.py partner_data.jsonl --dry-run
+    python scripts/importers/import_partner_jsonl.py partner_data.jsonl --status RAW_COLLECTED
 """
 
 import sys
@@ -34,13 +34,37 @@ from datetime import datetime
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from loguru import logger
 from storage.mysql_store import mysql
 
 # Required fields in partner's JSON
-REQUIRED_FIELDS = ["platform", "content_raw"]
+REQUIRED_FIELDS = ["platform", "content_raw", "content_type", "collected_at"]
+
+
+def _is_duplicate(platform: str, source_url: str, message_id) -> bool:
+    """Check if a record with the same platform + source_url already exists.
+    Falls back to platform + source_url alone if no message_id is available.
+    """
+    with mysql.cursor() as c:
+        if source_url and message_id:
+            c.execute(
+                """SELECT COUNT(*) as cnt FROM ods_raw_intel
+                   WHERE source_platform=%s AND source_url=%s
+                   AND JSON_EXTRACT(metadata, '$.message_id') = %s""",
+                (platform, source_url, str(message_id)),
+            )
+        elif source_url:
+            c.execute(
+                """SELECT COUNT(*) as cnt FROM ods_raw_intel
+                   WHERE source_platform=%s AND source_url=%s""",
+                (platform, source_url),
+            )
+        else:
+            return False
+        row = c.fetchone()
+        return (row["cnt"] if row else 0) > 0
 
 
 def validate(item: dict, line_no: int) -> list[str]:
@@ -77,6 +101,34 @@ def map_to_raw(item: dict) -> dict:
     }
 
 
+def exists_in_db(item: dict) -> bool:
+    """Best-effort idempotence check for partner imports."""
+    metadata = item.get("metadata") or {}
+    message_id = metadata.get("message_id") or item.get("message_id")
+    platform = item.get("platform", "unknown")
+    source_url = item.get("source_url", "")
+    from storage.mysql_store import mysql
+    with mysql.cursor() as c:
+        if source_url:
+            c.execute(
+                "SELECT id FROM ods_raw_intel WHERE source_platform=%s AND source_url=%s LIMIT 1",
+                (platform, source_url),
+            )
+            if c.fetchone():
+                return True
+        if message_id:
+            c.execute(
+                """SELECT id FROM ods_raw_intel
+                   WHERE source_platform=%s
+                     AND JSON_EXTRACT(metadata, '$.message_id') = %s
+                   LIMIT 1""",
+                (platform, str(message_id)),
+            )
+            if c.fetchone():
+                return True
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="Import partner JSONL into ods_raw_intel")
     parser.add_argument("file", help="Path to JSONL file")
@@ -90,7 +142,7 @@ def main():
         logger.error(f"File not found: {args.file}")
         sys.exit(1)
 
-    total, valid, skipped, imported = 0, 0, 0, 0
+    total, valid, skipped, imported, dedup = 0, 0, 0, 0, 0
     errors = []
 
     with open(filepath, "r", encoding="utf-8") as f:
@@ -121,8 +173,18 @@ def main():
                 continue
 
             try:
+                if exists_in_db(item):
+                    skipped += 1
+                    continue
                 mapped = map_to_raw(item)
                 mapped["raw_status"] = args.status
+
+                # Dedup: skip if same platform + source_url (+ message_id) already exists
+                msg_id = (item.get("metadata") or {}).get("message_id") or item.get("message_id")
+                if _is_duplicate(mapped["source_platform"], mapped["source_url"], msg_id):
+                    dedup += 1
+                    continue
+
                 raw_id = mysql.insert_raw(mapped)
                 imported += 1
                 if imported % 50 == 0:
@@ -138,6 +200,7 @@ def main():
     print(f"  Total lines: {total}")
     print(f"  Valid:       {valid}")
     print(f"  Imported:    {imported}")
+    print(f"  Duplicates:  {dedup}")
     print(f"  Skipped:     {skipped}")
     print("=" * 60)
 

@@ -4,10 +4,10 @@
 Output: data/mock_collected_intel.json — ready to feed into AnalysisEngine.
 
 Usage:
-    python scripts/generate_mock_intel.py              # 50 items
-    python scripts/generate_mock_intel.py -n 200      # 200 items
-    python scripts/generate_mock_intel.py --seed 42   # reproducible
-    python scripts/generate_mock_intel.py --output my_data.json
+    python scripts/data/generate_mock_intel.py
+    python scripts/data/generate_mock_intel.py -n 200
+    python scripts/data/generate_mock_intel.py --seed 42
+    python scripts/data/generate_mock_intel.py --output my_data.json
 """
 
 import argparse
@@ -17,7 +17,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # ── Platform-specific URL + ID generators ────────────────────────────────────
 
@@ -333,7 +334,7 @@ def main():
     parser.add_argument("-o", "--output", default=None)
     args = parser.parse_args()
 
-    output_path = args.output or str(Path(__file__).resolve().parent.parent / "data" / "mock_collected_intel.json")
+    output_path = args.output or str(PROJECT_ROOT / "data" / "mock_collected_intel.json")
 
     items = generate_items(args.count, args.seed)
 

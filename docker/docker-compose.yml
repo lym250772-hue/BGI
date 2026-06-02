@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
@@ -99,6 +97,58 @@ services:
     depends_on:
       - milvus
 
+  doris-fe:
+    build:
+      context: ./doris
+      dockerfile: Dockerfile
+    image: bagi-doris:2.1.7
+    container_name: bagi-doris-fe
+    profiles: ["olap"]
+    environment:
+      - DORIS_ROLE=fe
+    ports:
+      - "8030:8030"
+      - "9030:9030"
+    networks:
+      default:
+        # Doris FE stores its edit-log host in metadata. Keep this stable so
+        # Docker restarts do not leave FE waiting forever in UNKNOWN state.
+        ipv4_address: 172.20.0.8
+    volumes:
+      - ./doris/entrypoint.sh:/opt/doris/entrypoint.sh
+      - doris_fe_meta:/opt/doris/fe/doris-meta
+      - doris_fe_log:/opt/doris/fe/log
+    healthcheck:
+      # FE can accept a BE before the catalog is fully ready; checking /api/bootstrap
+      # here creates a deadlock because doris-be waits for FE health.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/9030'"]
+      interval: 15s
+      retries: 10
+
+  doris-be:
+    image: bagi-doris:2.1.7
+    container_name: bagi-doris-be
+    profiles: ["olap"]
+    environment:
+      - DORIS_ROLE=be
+    ulimits:
+      nofile:
+        soft: 655350
+        hard: 655350
+    ports:
+      - "9050:9050"
+      - "8040:8040"
+    networks:
+      default:
+        ipv4_address: 172.20.0.9
+    volumes:
+      - ./doris/entrypoint.sh:/opt/doris/entrypoint.sh
+      - doris_be_storage:/opt/doris/be/storage
+      - doris_be_log:/opt/doris/be/log
+    depends_on:
+      doris-fe:
+        condition: service_started
+
 volumes:
   mysql_data:
   neo4j_data:
@@ -107,3 +157,13 @@ volumes:
   etcd_data:
   minio_data:
   milvus_data:
+  doris_fe_meta:
+  doris_fe_log:
+  doris_be_storage:
+  doris_be_log:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

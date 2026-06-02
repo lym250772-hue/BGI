@@ -2,9 +2,9 @@
 """Feed mock collected intel JSON into MySQL raw_data table, ready for analysis.
 
 Usage:
-    python scripts/feed_mock_data.py                           # default: data/mock_collected_intel.json
-    python scripts/feed_mock_data.py -i custom.json            # custom input
-    python scripts/feed_mock_data.py --status pending          # insert as pending (needs cleaning)
+    python scripts/data/feed_mock_data.py
+    python scripts/data/feed_mock_data.py -i custom.json
+    python scripts/data/feed_mock_data.py --status RAW_COLLECTED
 """
 
 import argparse
@@ -13,7 +13,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from storage.mysql_store import mysql
 
@@ -57,7 +58,7 @@ def main():
     parser.add_argument("--status", default="cleaned", choices=["pending", "cleaned"])
     args = parser.parse_args()
 
-    default_path = Path(__file__).resolve().parent.parent / "data" / "mock_collected_intel.json"
+    default_path = PROJECT_ROOT / "data" / "mock_collected_intel.json"
     file_path = args.input or str(default_path)
 
     if not Path(file_path).exists():

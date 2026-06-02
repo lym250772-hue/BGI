@@ -1,45 +1,118 @@
 """Three-level cascade intent classifier: keyword → RoBERTa → LLM."""
 import re
+import yaml
+from pathlib import Path
 from loguru import logger
 
 from schema import IntentLabel, SUBLABEL_MAP, ClassificationMethod
 from config.settings import settings
 
+# ── IntentLabel name → enum member mapping for YAML lookup ──
+_LABEL_NAME_MAP = {lbl.value: lbl for lbl in IntentLabel}
+
+# Default built-in rules (fallback if YAML is missing or malformed)
+_BUILTIN_RULES: list[tuple[re.Pattern, tuple[str, str]]] = [
+    # 诈骗
+    (re.compile(r"代办.{0,5}(贷款|信用卡|签证)"), ("诈骗", "金融诈骗")),
+    (re.compile(r"(无抵押|秒批|黑户).{0,3}贷"), ("诈骗", "金融诈骗")),
+    (re.compile(r"(恭喜|中奖).{0,5}(领取|填写)"), ("诈骗", "虚假中奖")),
+    # 引流
+    (re.compile(r"(加.{0,3}[Qq薇微信]).{0,5}(看|视频|私密|福利)"), ("引流", "色情引流")),
+    (re.compile(r"[Qq薇微信]{1,2}.*\d{5,}"), ("引流", "站外导流")),
+    (re.compile(r"(菠菜|博彩|百家乐|真人视讯)"), ("引流", "赌博引流")),
+    # 作弊
+    (re.compile(r"(刷|提升).{0,3}(播放量|点赞|粉丝|销量|评论)"), ("作弊", "刷量刷单")),
+    (re.compile(r"(薅羊毛|撸货|套券|新人券)"), ("作弊", "营销套利")),
+    (re.compile(r"(外挂|辅助|脚本|透视|自瞄)"), ("作弊", "游戏外挂")),
+    # 账号黑产
+    (re.compile(r"(出|卖|售|收).{0,4}(号|账号)"), ("账号黑产", "账号买卖")),
+    (re.compile(r"(接码|猫池|打码|验证码.{0,3}接收)"), ("账号黑产", "批量注册/养号")),
+    (re.compile(r"(撞库|扫号|洗号|盗号)"), ("账号黑产", "撞库盗号")),
+    # 内容违规
+    (re.compile(r"(裸|黄片|AV|色情|福利姬|约炮)"), ("内容违规", "色情低俗")),
+    # 工具交易
+    (re.compile(r"(接码平台|发卡平台|卡密|黑卡)"), ("工具交易", "黑卡/接码")),
+    (re.compile(r"(出售|购买).{0,4}(数据|名单|信息)"), ("工具交易", "数据买卖")),
+    # 支付洗钱
+    (re.compile(r"(跑分|代收|通道|四方支付)"), ("支付洗钱", "支付洗钱")),
+    # 直播违规
+    (re.compile(r"(数字人|无人直播|录播).{0,4}(带货|直播)"), ("直播违规", "数字人欺诈")),
+    (re.compile(r"(挂机|挂播|循环).{0,3}直播"), ("直播违规", "无人直播")),
+]
+
+_RULES_YAML_PATH = Path(__file__).resolve().parent.parent / "config" / "risk_rules.yaml"
+
+
+def _build_rules_from_yaml(yaml_data: dict) -> list[tuple[re.Pattern, tuple[str, str]]]:
+    """Build compiled regex rules from YAML rule definitions."""
+    rules: list[tuple[re.Pattern, tuple[str, str]]] = []
+    for category, cfg in yaml_data.items():
+        if not isinstance(cfg, dict):
+            continue
+        # Regex patterns
+        for pat in cfg.get("regex", []):
+            try:
+                rules.append((re.compile(pat), (category, category)))
+            except re.error as exc:
+                logger.warning(f"Invalid regex in YAML rules [{category}]: {pat} — {exc}")
+        # Plain keywords
+        for kw in cfg.get("keywords", []):
+            esc = re.escape(kw)
+            rules.append((re.compile(esc), (category, category)))
+        # Variant keywords (拼音/谐音)
+        for v in cfg.get("variants", []):
+            esc = re.escape(v)
+            rules.append((re.compile(esc), (category, category)))
+        # Combo rules (all keywords must be present in text)
+        for combo in cfg.get("combos", []):
+            try:
+                lookaheads = "".join(f"(?=.*{re.escape(k)})" for k in combo)
+                rules.append((re.compile(f"^{lookaheads}", re.DOTALL), (category, "高危组合")))
+            except re.error as exc:
+                logger.warning(f"Invalid combo in YAML [{category}]: {combo} — {exc}")
+    return rules
+
+
+def _load_rules() -> list[tuple[re.Pattern, tuple[str, str]]]:
+    """Load rules from YAML config, falling back to built-in rules."""
+    if not _RULES_YAML_PATH.exists():
+        logger.warning(f"YAML rules file not found: {_RULES_YAML_PATH}, using built-in rules")
+        return _BUILTIN_RULES
+    try:
+        with open(_RULES_YAML_PATH, "r", encoding="utf-8") as f:
+            yaml_data = yaml.safe_load(f)
+        if not yaml_data:
+            return _BUILTIN_RULES
+        rules = _build_rules_from_yaml(yaml_data)
+        if rules:
+            logger.info(f"Loaded {len(rules)} classification rules from risk_rules.yaml")
+            return rules
+        return _BUILTIN_RULES
+    except Exception as exc:
+        logger.warning(f"Failed to load YAML rules: {exc}, using built-in rules")
+        return _BUILTIN_RULES
+
 
 class IntentClassifier:
-    """Classify black/grey-market intel text into 7 risk categories."""
+    """Classify black/grey-market intel text into risk categories.
+
+    Rules are loaded from config/risk_rules.yaml at init time,
+    with built-in Python rules as fallback.
+    """
 
     # ------------------------------------------------------------------
-    # L1: Keyword rules (~30% coverage)
+    # L1: Keyword rules — loaded from YAML at init
     # ------------------------------------------------------------------
 
-    # (keyword_pattern, (intent_label, sub_label))
-    KEYWORD_RULES: list[tuple[re.Pattern, tuple[str, str]]] = [
-        # 诈骗
-        (re.compile(r"代办.{0,5}(贷款|信用卡|签证)"), (IntentLabel.FRAUD, "金融诈骗")),
-        (re.compile(r"(无抵押|秒批|黑户).{0,3}贷"), (IntentLabel.FRAUD, "金融诈骗")),
-        (re.compile(r"(恭喜|中奖).{0,5}(领取|填写)"), (IntentLabel.FRAUD, "虚假中奖")),
-        # 引流
-        (re.compile(r"(加.{0,3}[Qq薇微信]).{0,5}(看|视频|私密|福利)"), (IntentLabel.TRAFFIC_DRIVEN, "色情引流")),
-        (re.compile(r"[Qq薇微信]{1,2}.*\d{5,}"), (IntentLabel.TRAFFIC_DRIVEN, "站外导流")),
-        (re.compile(r"(菠菜|博彩|百家乐|真人视讯)"), (IntentLabel.TRAFFIC_DRIVEN, "赌博引流")),
-        # 作弊
-        (re.compile(r"(刷|提升).{0,3}(播放量|点赞|粉丝|销量|评论)"), (IntentLabel.CHEATING, "刷量刷单")),
-        (re.compile(r"(薅羊毛|撸货|套券|新人券)"), (IntentLabel.CHEATING, "营销套利")),
-        (re.compile(r"(外挂|辅助|脚本|透视|自瞄)"), (IntentLabel.CHEATING, "游戏外挂")),
-        # 账号黑产
-        (re.compile(r"(出|卖|售|收).{0,4}(号|账号)"), (IntentLabel.ACCOUNT_BLACK, "账号买卖")),
-        (re.compile(r"(接码|猫池|打码|验证码.{0,3}接收)"), (IntentLabel.ACCOUNT_BLACK, "批量注册/养号")),
-        (re.compile(r"(撞库|扫号|洗号|盗号)"), (IntentLabel.ACCOUNT_BLACK, "撞库盗号")),
-        # 内容违规
-        (re.compile(r"(裸|黄片|AV|色情|福利姬|约炮)"), (IntentLabel.CONTENT_VIOLATION, "色情低俗")),
-        # 工具交易
-        (re.compile(r"(接码平台|发卡平台|卡密|黑卡)"), (IntentLabel.TOOL_TRADE, "黑卡/接码")),
-        (re.compile(r"(出售|购买).{0,4}(数据|名单|信息)"), (IntentLabel.TOOL_TRADE, "数据买卖")),
-        # 直播违规
-        (re.compile(r"(数字人|无人直播|录播).{0,4}(带货|直播)"), (IntentLabel.LIVE_VIOLATION, "数字人欺诈")),
-        (re.compile(r"(挂机|挂播|循环).{0,3}直播"), (IntentLabel.LIVE_VIOLATION, "无人直播")),
-    ]
+    def __init__(self):
+        self.KEYWORD_RULES: list[tuple[re.Pattern, tuple[str, str]]] = []
+        self.reload_rules()
+        self._roberta = None
+
+    def reload_rules(self) -> int:
+        """Reload classification rules from YAML config. Returns rule count."""
+        self.KEYWORD_RULES = _load_rules()
+        return len(self.KEYWORD_RULES)
 
     def classify_keyword(self, text: str) -> tuple[str, str, float] | None:
         """Try to classify by keyword rules. Returns (label, sub_label, confidence) or None."""
@@ -51,9 +124,6 @@ class IntentClassifier:
     # ------------------------------------------------------------------
     # L2: RoBERTa model (stub — train before use)
     # ------------------------------------------------------------------
-
-    def __init__(self):
-        self._roberta = None
 
     @property
     def roberta(self):
@@ -84,22 +154,20 @@ class IntentClassifier:
         return None
 
     def classify_roberta(self, text: str) -> tuple[str, str, float] | None:
-        """L2 classification via fine-tuned RoBERTa."""
+        """L2 classification via fine-tuned RoBERTa (7 main categories)."""
         result = self.roberta(text)
         if result is None:
             return None
-        # result is a list[dict] from transformers pipeline
         if isinstance(result, list):
             result = result[0]
         label = result.get("label", "")
         score = result.get("score", 0.0)
         if score < settings.classification_confidence_threshold:
             return None
-        # label format: "LABEL_SUBLABEL" e.g. "作弊_刷量刷单"
-        if "_" in label:
-            main, sub = label.split("_", 1)
-        else:
-            main, sub = label, ""
+        # label is one of 7 main categories: 诈骗, 引流, 作弊, 账号黑产, 内容违规, 工具交易, 直播违规
+        # Sub-label refinement is handled by L1 keyword rules or L3 LLM
+        main = label
+        sub = ""  # sub_label from keyword mapping if available
         return main, sub, score
 
     # ------------------------------------------------------------------

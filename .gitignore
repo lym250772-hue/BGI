@@ -24,8 +24,13 @@ env/
 # Data (generated/collected)
 data/raw/
 data/cleaned/
-data/models/*.pt
-data/models/*.bin
+data/models/**
+tmp/
+*.safetensors
+*.pt
+*.pth
+*.bin
+checkpoint-*/
 
 # Docker volumes
 docker/volumes/

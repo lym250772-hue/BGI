@@ -1,14 +1,14 @@
 """
 贴吧关键词搜索功能测试
-用法: python tests/test_tieba_search.py
-      python tests/test_tieba_search.py 刷单 2      # 自定义关键词和页数
-      python tests/test_tieba_search.py 刷单 1 --no-replies  # 不采集回复
+用法: python scripts/crawl/tieba_search_smoke.py
+      python scripts/crawl/tieba_search_smoke.py 刷单 2
+      python scripts/crawl/tieba_search_smoke.py 刷单 1 --no-replies
 """
 import sys
 import re
 import argparse
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 

@@ -6,9 +6,9 @@ L3 embedding-based variant detection. This script reads a structured file
 and populates both `slang_dict` (MySQL) and `slang_embeddings` (Milvus).
 
 Usage:
-    python scripts/import_seed_slang.py                          # default seed file
-    python scripts/import_seed_slang.py --file data/slang.csv   # custom file
-    python scripts/import_seed_slang.py --dry-run               # print without import
+    python scripts/importers/import_seed_slang.py
+    python scripts/importers/import_seed_slang.py --file data/slang.csv
+    python scripts/importers/import_seed_slang.py --dry-run
 
 Seed file format (CSV):
     slang,normalized_meaning,category
@@ -26,7 +26,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Built-in seed slang (used when no file is provided)
 _SEED_SLANG: list[dict] = [

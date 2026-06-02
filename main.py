@@ -62,6 +62,17 @@ def init_db():
     logger.info("Initializing Milvus...")
     milvus.init_collections()
 
+    from config.settings import settings
+    if settings.doris_enabled:
+        logger.info("Initializing Doris (OLAP)...")
+        try:
+            from storage.doris_store import doris
+            doris.init_tables()
+        except Exception as exc:
+            logger.warning(f"Doris init skipped (not critical): {exc}")
+    else:
+        logger.info("Doris disabled; set BGI_DORIS_ENABLED=true to enable OLAP")
+
     logger.info("Loading seed slang dictionary...")
     _load_seed_slang()
 
@@ -405,10 +416,22 @@ def analyze(limit: int):
         logger.warning("No cleaned items found. Run 'python main.py clean' first.")
         return
 
+    # Preload clean texts for all items
+    clean_map = {}
+    with mysql.cursor() as c:
+        c.execute(
+            "SELECT raw_id, merged_text, clean_text FROM dwd_clean_intel WHERE raw_id IN (%s)"
+            % ",".join(["%s"] * len(items)),
+            [it["id"] for it in items],
+        )
+        for row in c.fetchall():
+            clean_map[row["raw_id"]] = row
+
     analyzed = 0
     for item in items:
-        # Prefer clean_text from dwd_clean_intel, fall back to content_raw
-        text = item.get("clean_text") or item.get("content_raw", "")
+        # Priority: merged_text > clean_text > content_raw
+        clean = clean_map.get(item["id"], {})
+        text = clean.get("merged_text") or clean.get("clean_text") or item.get("content_raw", "")
         if not text or not text.strip():
             continue
         try:

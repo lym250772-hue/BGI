@@ -2,15 +2,15 @@
 """Import slang terms from Excel files into MySQL slang_dict + Milvus embeddings.
 
 Usage:
-    python scripts/import_slang_from_excel.py "黑话对应释义表/"
-    python scripts/import_slang_from_excel.py --dry-run   # preview only
+    python scripts/importers/import_slang_from_excel.py "黑话对应释义表/"
+    python scripts/importers/import_slang_from_excel.py --dry-run
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import pandas as pd
 from loguru import logger

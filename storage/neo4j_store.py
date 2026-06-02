@@ -1,8 +1,8 @@
 """Neo4j knowledge graph layer for entity relationship discovery.
 
-Refined schema (v0.4):
-  Nodes:  Intel, Account, Tool, Contact, Link
-  Edges:  MENTIONS, PROMOTES, USES_CONTACT, CO_OCCURS
+Refined schema (v0.5):
+  Nodes:  Intel, Account, Tool, Contact, Link, Slang, Wallet
+  Edges:  MENTIONS, USES_ACCOUNT, PROMOTES_LINK, PROMOTES_TOOL, USES_SLANG, CO_OCCURS
 
 Gang detection via shared-contact pattern:
   (Account A)-[:USES_CONTACT]->(Contact X)<-[:USES_CONTACT]-(Account B)
@@ -15,32 +15,36 @@ from config.settings import settings
 
 # Entity type → refined node label mapping
 _TYPE_TO_LABEL = {
-    "wechat":    "Account",
-    "qq":        "Account",
-    "alipay":    "Account",
-    "phone":     "Contact",
-    "email":     "Contact",
-    "url":       "Link",
-    "domain":    "Link",
-    "ip":        "Link",
-    "bank_card": "Contact",
-    "tool":      "Tool",
-    "slang":     "Contact",
+    "wechat":        "Account",
+    "qq":            "Account",
+    "alipay":        "Account",
+    "telegram":      "Account",
+    "phone":         "Contact",
+    "email":         "Contact",
+    "bank_card":     "Contact",
+    "url":           "Link",
+    "domain":        "Link",
+    "ip":            "Link",
+    "tool":          "Tool",
+    "slang":         "Slang",
+    "crypto_wallet": "Wallet",
 }
 
 # Entity type → relationship type mapping
 _TYPE_TO_REL = {
-    "wechat":    "MENTIONS",
-    "qq":        "MENTIONS",
-    "alipay":    "MENTIONS",
-    "phone":     "MENTIONS",
-    "email":     "MENTIONS",
-    "url":       "PROMOTES",
-    "domain":    "PROMOTES",
-    "ip":        "PROMOTES",
-    "bank_card": "MENTIONS",
-    "tool":      "PROMOTES",
-    "slang":     "MENTIONS",
+    "wechat":        "USES_ACCOUNT",
+    "qq":            "USES_ACCOUNT",
+    "alipay":        "USES_ACCOUNT",
+    "telegram":      "USES_ACCOUNT",
+    "phone":         "USES_CONTACT",
+    "email":         "USES_CONTACT",
+    "bank_card":     "USES_CONTACT",
+    "url":           "PROMOTES_LINK",
+    "domain":        "PROMOTES_LINK",
+    "ip":            "PROMOTES_LINK",
+    "tool":          "PROMOTES_TOOL",
+    "slang":         "USES_SLANG",
+    "crypto_wallet": "USES_CONTACT",
 }
 
 
@@ -67,15 +71,18 @@ class Neo4jStore:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (i:Intel) REQUIRE i.raw_id IS UNIQUE",
             "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.type)",
             "CREATE INDEX IF NOT EXISTS FOR (e:Entity) ON (e.value)",
-            # Refined schema constraints
+            # Refined schema constraints (v0.5)
             "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Account) REQUIRE a.value IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (t:Tool) REQUIRE t.value IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (c:Contact) REQUIRE c.value IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (l:Link) REQUIRE l.value IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (s:Slang) REQUIRE s.value IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (w:Wallet) REQUIRE w.value IS UNIQUE",
             # Indexes for refined labels
             "CREATE INDEX IF NOT EXISTS FOR (a:Account) ON (a.type)",
             "CREATE INDEX IF NOT EXISTS FOR (c:Contact) ON (c.type)",
             "CREATE INDEX IF NOT EXISTS FOR (l:Link) ON (l.type)",
+            "CREATE INDEX IF NOT EXISTS FOR (s:Slang) ON (s.type)",
         ]
         with self.driver.session() as sess:
             for q in queries:
@@ -83,7 +90,7 @@ class Neo4jStore:
                     sess.run(q)
                 except Exception as ex:
                     logger.warning(f"Neo4j constraint: {ex}")
-        logger.info("Neo4j constraints initialized (legacy + refined schema)")
+        logger.info("Neo4j constraints initialized (legacy + refined schema v0.5)")
 
     # ------------------------------------------------------------------
     # Node creation / merge
@@ -147,11 +154,13 @@ class Neo4jStore:
     def find_entity_neighborhood(self, entity_type: str, value: str, depth: int = 2):
         """Return the subgraph around an entity up to `depth` hops."""
         uuid = f"{entity_type}:{value}"
+        depth = max(1, min(int(depth or 1), 3))
         with self.driver.session() as sess:
             result = sess.run(f"""
-                MATCH (e:Entity {{uuid: $uuid}})-[r*1..{depth}]-(related)
+                MATCH (e)-[r*1..{depth}]-(related)
+                WHERE (e.uuid = $uuid) OR (e.value = $value AND e.type = $type)
                 RETURN e, r, related LIMIT 50
-            """, uuid=uuid)
+            """, uuid=uuid, value=value, type=entity_type)
             return [{"nodes": r["e"], "rels": r["r"], "related": r["related"]}
                     for r in result]
 
@@ -257,19 +266,19 @@ class Neo4jStore:
     def discover_gangs(self):
         """Find Accounts sharing the same Contact → create CO_OCCURS edges.
 
-        This is the core gang-detection query: when two different Accounts
-        use the same Contact (phone/email/bank_card), they are likely
-        operated by the same group.
+        Refined v0.5 schema: (Intel)-[:USES_ACCOUNT]->(Account)
+                            (Intel)-[:USES_CONTACT]->(Contact)
+        When two different Accounts are linked to intel that share the same
+        Contact (phone/email/bank_card), they are likely the same gang.
         """
         with self.driver.session() as sess:
             result = sess.run("""
-                MATCH (c:Contact)
-                MATCH (a1:Account)-[:MENTIONS]->()<-[:MENTIONS]-(i:Intel)
-                MATCH (i)-[:MENTIONS]->(c)
-                MATCH (a2:Account)-[:MENTIONS]->()<-[:MENTIONS]-(i2:Intel)
-                MATCH (i2)-[:MENTIONS]->(c)
+                MATCH (i1:Intel)-[:USES_ACCOUNT]->(a1:Account)
+                MATCH (i1)-[:USES_CONTACT]->(c:Contact)
+                MATCH (i2:Intel)-[:USES_ACCOUNT]->(a2:Account)
+                MATCH (i2)-[:USES_CONTACT]->(c)
                 WHERE a1.value < a2.value
-                WITH a1, a2, c, COUNT(DISTINCT i) + COUNT(DISTINCT i2) AS shared
+                WITH a1, a2, c, COUNT(DISTINCT i1) + COUNT(DISTINCT i2) AS shared
                 MERGE (a1)-[:CO_OCCURS {reason: 'SHARED_CONTACT', contact: c.value}]->(a2)
                 RETURN a1.value, a2.value, c.value, shared
                 LIMIT 100
@@ -345,6 +354,10 @@ class Neo4jStore:
                         group = "link"
                     elif "Contact" in elabels:
                         group = "contact"
+                    elif "Slang" in elabels:
+                        group = "slang"
+                    elif "Wallet" in elabels:
+                        group = "wallet"
                     else:
                         group = e.get("type", "entity")
 

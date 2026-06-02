@@ -3,16 +3,16 @@
 
 Usage:
     # Demo with built-in sample data
-    python scripts/demo_one.py
+    python scripts/demo/demo_one.py
 
     # Demo with a specific existing raw_id
-    python scripts/demo_one.py --raw-id 200
+    python scripts/demo/demo_one.py --raw-id 200
 
     # Demo with a custom JSON file
-    python scripts/demo_one.py --json sample.json
+    python scripts/demo/demo_one.py --json sample.json
 
     # Demo with JSON from stdin
-    echo '{"platform":"telegram","content_raw":"..."}' | python scripts/demo_one.py --stdin
+    echo '{"platform":"telegram","content_raw":"..."}' | python scripts/demo/demo_one.py --stdin
 
 This is the "key moment" script for presentations:
     输入一条情报 JSON → 一键研判 → 展示完整结果
@@ -24,7 +24,7 @@ import os
 import argparse
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
