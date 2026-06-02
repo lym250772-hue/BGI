@@ -1,5 +1,36 @@
 # BGI 变更日志
 
+## 2026-06-03 — 采集层恢复 + 示例数据更新
+
+### ✏️ 恢复核心文件
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/spiders/base_spider.py` | Spider 基类（Cookie管理/反爬/检查点） |
+| `collectors/spiders/weibo_api_spider.py` | 微博 AJAX API（~8条/秒，含评论采集） |
+| `collectors/spiders/douyin_spider.py` | 抖音首页搜索+正则（含 image_list/video_cover_url） |
+| `collectors/spiders/xiaohongshu_spider.py` | 小红书 API拦截+DOM（含 image_list） |
+| `collectors/base.py, registry.py` | IntelItem 统一格式 + 平台注册表 |
+| `collectors/douyin_collector.py, xiaohongshu_collector.py` | 抖音/小红书 Collector |
+
+### 📊 示例数据更新
+
+| 平台 | 条数 | 特点 |
+|------|:--:|------|
+| weibo | 380 | 5关键词x5页，含评论 |
+| zhihu | 375 | 5关键词x5页，含答案+评论 |
+| xiaohongshu | 180 | 3关键词x3页，含图片列表 |
+| douyin | 123 | 3关键词x3页，含封面+图片 |
+| tieba | 18 | 3关键词x2页，含回复 |
+
+### 🔧 修复
+
+- `collect_examples.py`：微博接入评论采集、贴吧启用回复采集、清除增量状态
+- `cleaner/__init__.py`：移除已删除的 media_processor 导入
+- 文档全部更新至当前状态
+
+---
+
 ## 2026-06-02 — 大规模多通道并发采集 + 知乎API加速 + 评论采集 + 图文存储 (v2.0)
 
 ### 🆕 并发编排引擎

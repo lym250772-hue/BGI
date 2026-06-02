@@ -6,12 +6,14 @@
 
 | 文件 | 平台 | 条数 | 关键词 | 采集技术 | 数据特点 |
 |------|------|:--:|------|------|------|
-| `weibo_sample.json` | 微博 | 19 | 刷单 | AJAX API (`weibo.com/ajax/statuses/search`) | 含转发/评论/点赞数、weibo_id |
-| `zhihu_sample.json` | 知乎 | 20 | 刷单 | Playwright API直调 (`/api/v4/search_v3`) | 含回答内容、投票数、话题标签 |
-| `xiaohongshu_sample.json` | 小红书 | 20 | 刷单 | Playwright API拦截 + DOM兜底 | 含收藏/评论数、标签、图片列表 |
-| `tieba_sample.json` | 贴吧 | 8 | 刷单 | Playwright DOM解析 (`.thread-content-box`) | 含帖子回复、吧名、thread_id |
-| `douyin_sample.json` | 抖音 | 5 | 刷单 | Playwright 首页搜索框 + 正则提取 | 含点赞/评论/分享数、时长、hashtags |
-| `telegram_sample.json` | Telegram | ⚠️ | — | Telethon（需 API ID/Hash） | 待配置 |
+| `weibo_sample.json` | 微博 | 380 | 刷单/接码/跑分/账号出售/代付 | AJAX API | 含评论(71条)、转发/点赞数 |
+| `zhihu_sample.json` | 知乎 | 375 | 刷单/接码/跑分/账号出售/代付 | 纯HTTP API | 含答案(145条)+评论(96条)、话题标签 |
+| `xiaohongshu_sample.json` | 小红书 | 180 | 刷单/接码/跑分 | Playwright API拦截+DOM | 含图片列表、收藏/评论数、标签 |
+| `douyin_sample.json` | 抖音 | 123 | 刷单/接码/跑分 | Playwright 首页搜索+正则 | 含图片列表、视频封面、点赞/分享数 |
+| `tieba_sample.json` | 贴吧 | 18 | 刷单/接码/跑分 | Playwright DOM解析 | 含帖子回复、吧名、thread_id |
+| `telegram_sample.json` | Telegram | — | — | Telethon（需 API ID/Hash） | 待配置 |
+
+> **合计**: 1,076 条 / 1.4MB / 5 平台
 
 ## 数据格式
 
@@ -44,6 +46,6 @@ python scripts/collect_examples.py --max-pages 2
 python scripts/collect_examples.py -k "接码,跑分,账号出售" --max-pages 1
 ```
 
-> **注意**: 采集需要有效的 Cookie。如果 Cookie 过期，先运行 `python main.py login -p <平台>` 重新登录。
+> **注意**: 采集需要有效的 Cookie。如果 Cookie 过期，运行 `python login_edge.py <平台>` 重新登录（如 `python login_edge.py tieba`）。
 >
 > 采集到的是各平台公开可⻅内容，仅供安全研究和竞赛评估使用。
