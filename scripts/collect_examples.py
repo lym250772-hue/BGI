@@ -80,7 +80,7 @@ def _serialize(obj):
     return obj
 
 
-def collect_weibo(keyword: str, max_pages: int) -> list[dict]:
+def collect_weibo(keyword: str, max_pages: int, fetch_comments: bool = True) -> list[dict]:
     """Collect from Weibo (pure HTTP API, no browser)."""
     from collectors.spiders.weibo_api_spider import WeiboAPISpider
 
@@ -90,7 +90,21 @@ def collect_weibo(keyword: str, max_pages: int) -> list[dict]:
         logger.info("[weibo] Searching: {} (max_pages={})", keyword, max_pages)
         parsed = spider.search(keyword, max_pages=max_pages)
         for item in parsed:
-            all_items.append(_serialize(item))
+            d = _serialize(item)
+            # 采集评论
+            if fetch_comments and item.comments_count > 0:
+                try:
+                    comments = spider.get_comments(item.weibo_id, max_pages=2)
+                    d.setdefault("metadata", {})["comments"] = [
+                        {"id": c.get("id", ""),
+                         "author": (c.get("user", {}) or {}).get("screen_name", ""),
+                         "text": c.get("text_raw", "") or c.get("text", ""),
+                         "like_count": c.get("like_counts", 0)}
+                        for c in comments
+                    ]
+                except Exception:
+                    pass
+            all_items.append(d)
         logger.info("[weibo] {} items collected", len(all_items))
     finally:
         if spider._session:
@@ -121,7 +135,7 @@ def collect_playwright(platform: str, keyword: str, max_pages: int) -> list[dict
         if platform == "zhihu":
             items = spider.search_and_parse(
                 keyword, max_pages=max_pages,
-                fetch_answers=True, fetch_comments=False)
+                fetch_answers=True, fetch_comments=True)
         elif platform == "tieba":
             items = spider.search_and_parse(
                 keyword, max_pages=max_pages,
