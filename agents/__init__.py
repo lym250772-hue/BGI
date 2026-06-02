@@ -1,1 +1,1 @@
-"""BGI Agent modules — Report, Graph, and Orchestrator."""
+"""BGI Agent modules — Graph expansion and Report generation."""

@@ -1,56 +1,49 @@
-# 多源数据采集示例
+# 示例数据 — 多源采集真实样本
 
-本目录存放各平台数据采集接口的示例输出，供协作者对照开发使用。
+本目录存放从各平台采集到的真实黑灰产相关样本数据，用于分析引擎开发、测试和演示。
 
-## 文件说明
+## 采集概况
 
-| 文件 | 平台 | 采集量 | 关键词 | 说明 |
-|------|------|:------:|--------|------|
-| `weibo_sample.json` | 微博 | 20条 | 刷单 | 含用户名、UID、时间、内容类型、链接等完整字段 |
-| `zhihu_sample.json` | 知乎 | 10条 | 刷单 | 含问题、摘要、完整回答（赞数/评论数）、话题标签 |
-| `tieba_sample.json` | 贴吧 | 4条 | 刷单 | 含帖吧名、用户名、回复数、正文、表情/图片检测 |
+| 文件 | 平台 | 条数 | 关键词 | 采集技术 | 数据特点 |
+|------|------|:--:|------|------|------|
+| `weibo_sample.json` | 微博 | 19 | 刷单 | AJAX API (`weibo.com/ajax/statuses/search`) | 含转发/评论/点赞数、weibo_id |
+| `zhihu_sample.json` | 知乎 | 20 | 刷单 | Playwright API直调 (`/api/v4/search_v3`) | 含回答内容、投票数、话题标签 |
+| `xiaohongshu_sample.json` | 小红书 | 20 | 刷单 | Playwright API拦截 + DOM兜底 | 含收藏/评论数、标签、图片列表 |
+| `tieba_sample.json` | 贴吧 | 8 | 刷单 | Playwright DOM解析 (`.thread-content-box`) | 含帖子回复、吧名、thread_id |
+| `douyin_sample.json` | 抖音 | 5 | 刷单 | Playwright 首页搜索框 + 正则提取 | 含点赞/评论/分享数、时长、hashtags |
+| `telegram_sample.json` | Telegram | ⚠️ | — | Telethon（需 API ID/Hash） | 待配置 |
 
-## 数据结构
+## 数据格式
 
-所有平台输出统一为以下 JSON 格式：
+每条数据遵循 `IntelItem` 格式（`collectors/base.py`），核心字段：
 
 ```json
 {
-  "platform": "平台标识",
-  "keyword": "搜索关键词",
-  "count": 采集数量,
-  "items": [
-    {
-      "platform": "平台名",
-      "author_username": "作者用户名",
-      "content_raw": "原始内容文本",
-      "source_url": "来源链接",
-      "collected_at": "采集时间 (ISO 8601)",
-      "keyword": "匹配关键词",
-      ...
-    }
-  ]
+  "platform": "weibo",
+  "content_raw": "原始正文内容...",
+  "content_type": "text",
+  "source_url": "https://weibo.com/...",
+  "author_uid": "作者UID",
+  "author_username": "作者昵称",
+  "collected_at": "2026-06-02T22:19:xx",
+  "keyword": "刷单",
+  "metadata": { "weibo_id": "...", "reposts_count": 0, ... }
 }
 ```
 
-## 采集接口
-
-各平台采集测试命令：
+## 重新采集
 
 ```bash
-# 微博（20条/页）
-python tests/test_weibo_search.py "刷单" 1
+# 单平台
+python scripts/collect_examples.py --platforms weibo --max-pages 2 -k "刷单"
 
-# 知乎（10条/页，含回答）
-python tests/test_zhihu_search.py "刷单" 1
+# 全平台（需先 docker compose up -d 启动基础设施）
+python scripts/collect_examples.py --max-pages 2
 
-# 贴吧（4~50条/页，含回复）
-python tests/test_tieba_search.py "刷单" 1
+# 自定义关键词
+python scripts/collect_examples.py -k "接码,跑分,账号出售" --max-pages 1
 ```
 
-## 注意事项
-
-- 贴吧反爬较强，短时间多次请求会触发百度滑块验证码，建议采集间隔 > 5 分钟
-- 知乎需要有效的 `z_c0` Cookie，JS 注入方式与常规 `add_cookies` 不同
-- 微博 Cookie 有较长有效期，部分字段（如长文/视频检测）需要展开全文
-- Telegram 需要 API ID/Hash，目前未配置
+> **注意**: 采集需要有效的 Cookie。如果 Cookie 过期，先运行 `python main.py login -p <平台>` 重新登录。
+>
+> 采集到的是各平台公开可⻅内容，仅供安全研究和竞赛评估使用。

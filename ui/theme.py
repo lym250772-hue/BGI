@@ -1,374 +1,300 @@
-"""BGI Design System — Editorial Intelligence Bureau aesthetic."""
+"""Streamlit design system for the BGI analyst console."""
 
-# ── Palette ──────────────────────────────────────────────────────────────────
-WHITE      = "#FFFFFF"
-BG_BASE    = "#F8F6F2"
-BG_CARD    = "#FEFDFB"
-BG_SIDEBAR = "#F0EDE7"
-TEXT_MAIN  = "#1F1D19"
-TEXT_SOFT  = "#5C5852"
-TEXT_MUTED = "#8A857D"
-SAGE       = "#7D9378"
-SAGE_DARK  = "#5F765B"
-SLATE      = "#6D7D8E"
-ROSE       = "#BEA09D"
-ROSE_DARK  = "#9E7A77"
-BORDER     = "#D8D2C8"
-DIVIDER    = "#E8E2D7"
-GOLD       = "#B8976A"
-INK        = "#1E1B18"
+BG = "#F4F6F8"
+PANEL = "#FFFFFF"
+INK = "#18202A"
+TEXT = "#263442"
+MUTED = "#6F7F8F"
+LINE = "#D8E0E8"
+SOFT = "#EEF2F5"
+ACCENT = "#176B87"
+ACCENT_DARK = "#0E4E63"
+GREEN = "#26735D"
+AMBER = "#B88418"
+RED = "#B83A3A"
+BLUE = "#365C8D"
+PURPLE = "#6A5C8D"
 
-# ── Typography ───────────────────────────────────────────────────────────────
-FONT_DISPLAY = "Noto Serif SC"
-FONT_BODY    = "Work Sans"
-FONT_MONO    = "JetBrains Mono"
+RISK_COLORS = {
+    "critical": RED,
+    "high": "#D06A2A",
+    "medium": AMBER,
+    "normal": BLUE,
+    "low": GREEN,
+}
 
-# ── CSS ──────────────────────────────────────────────────────────────────────
+STATUS_COLORS = {
+    "RAW_COLLECTED": AMBER,
+    "CLEANED": BLUE,
+    "ANALYZING": PURPLE,
+    "ANALYZED": GREEN,
+    "FAILED": RED,
+    "DISCARDED": MUTED,
+    "pending": AMBER,
+    "running": PURPLE,
+    "success": GREEN,
+    "failed": RED,
+}
+
+
+def badge(text: str, color: str = ACCENT) -> str:
+    return (
+        f"<span class='bagi-badge' style='--badge-color:{color}'>{text}</span>"
+    )
+
+
+def status_dot(ok: bool, label: str) -> str:
+    color = GREEN if ok else RED
+    return (
+        f"<span class='status-pill' style='--status-color:{color}'>"
+        f"<span></span>{label}</span>"
+    )
+
+
 CSS = f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@400;500;600;700&family=Work+Sans:wght@350;450;550&display=swap');
+:root {{
+  --bagi-bg: {BG};
+  --bagi-panel: {PANEL};
+  --bagi-ink: {INK};
+  --bagi-text: {TEXT};
+  --bagi-muted: {MUTED};
+  --bagi-line: {LINE};
+  --bagi-soft: {SOFT};
+  --bagi-accent: {ACCENT};
+  --bagi-accent-dark: {ACCENT_DARK};
+}}
 
-/* ═══ Shell ═══ */
 .stApp {{
-    background: {BG_BASE};
-}}
-.stMainBlock {{
-    padding-top: 1.5rem;
+  background:
+    linear-gradient(90deg, rgba(24,32,42,0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(0deg, rgba(24,32,42,0.018) 1px, transparent 1px) 0 0 / 28px 28px,
+    var(--bagi-bg);
+  color: var(--bagi-text);
 }}
 
-/* Header — keep it clean, DO NOT hide the collapse/expand controls */
 header[data-testid="stHeader"] {{
-    background: transparent !important;
-    box-shadow: none !important;
-    border-bottom: 1px solid {DIVIDER};
+  background: rgba(244,246,248,0.92) !important;
+  border-bottom: 1px solid var(--bagi-line);
 }}
 
-/* Only hide decorative chrome — never hide sidebar controls */
 #MainMenu, footer, .viewerBadge_container__r5tak {{
-    display: none !important;
+  display: none !important;
 }}
 
-/* Ensure collapsed-sidebar expand button is ALWAYS visible and clickable */
-[data-testid="collapsedControl"] {{
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    z-index: 999999 !important;
-    background: {BG_SIDEBAR} !important;
-    border: 1px solid {BORDER} !important;
-    border-left: none !important;
-    border-radius: 0 8px 8px 0 !important;
-    padding: 0.5rem 0.3rem !important;
-    position: fixed !important;
-    left: 0 !important;
-    top: 50% !important;
-    transform: translateY(-50%) !important;
-    box-shadow: 2px 0 8px rgba(30,27,24,0.08) !important;
-}}
-[data-testid="collapsedControl"] button {{
-    color: {TEXT_MAIN} !important;
-    font-size: 1.1rem !important;
-    font-weight: 600 !important;
-    background: transparent !important;
-    border: none !important;
-    padding: 4px 6px !important;
-    cursor: pointer !important;
-}}
-[data-testid="collapsedControl"]:hover {{
-    background: {BG_CARD} !important;
-    box-shadow: 2px 0 12px rgba(30,27,24,0.12) !important;
-}}
-
-/* Also keep the sidebar collapse button (‹) visible when sidebar is open */
-[data-testid="stSidebar"] button[kind="header"] {{
-    color: {TEXT_SOFT} !important;
-    opacity: 1 !important;
-}}
-[data-testid="stSidebar"] button[kind="header"]:hover {{
-    color: {TEXT_MAIN} !important;
-    background: {BG_BASE} !important;
-}}
-
-/* ═══ Sidebar ═══ */
 [data-testid="stSidebar"] {{
-    background: {BG_SIDEBAR};
-    border-right: 1px solid {BORDER};
+  background: #121820;
+  border-right: 1px solid #25313E;
 }}
 
-/* Sidebar content spacing */
-[data-testid="stSidebar"] .stMarkdown {{
-    padding: 0 0.5rem;
-}}
-
-/* Sidebar nav — radio-based for reliability */
-[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
-    gap: 0.2rem;
-}}
-
-[data-testid="stSidebar"] .stRadio > div {{
-    gap: 0.15rem;
+[data-testid="stSidebar"] * {{
+  color: #D7E0E8;
 }}
 
 [data-testid="stSidebar"] .stRadio label {{
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    font-size: 0.85rem;
-    font-weight: 450;
-    color: {TEXT_SOFT};
-    transition: all 0.15s;
-    cursor: pointer;
+  border-radius: 6px;
+  padding: 0.52rem 0.72rem;
+  color: #B9C4CE !important;
+  font-size: 0.88rem;
 }}
 
 [data-testid="stSidebar"] .stRadio label:hover {{
-    background: {BG_BASE};
-    color: {TEXT_MAIN};
+  background: #1B2530;
+  color: #FFFFFF !important;
 }}
 
-/* Active radio pill */
-[data-testid="stSidebar"] .stRadio [data-baseweb="radio"] + div {{
-    /* The checked state indicator is tricky with Streamlit's radio */
-}}
-
-/* Simpler: use the container styling */
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
-    background: {BG_CARD} !important;
-    color: {TEXT_MAIN} !important;
-    font-weight: 550 !important;
-    border: 1px solid {BORDER};
-    box-shadow: 0 1px 3px rgba(30,27,24,0.04);
+  background: #E6EEF4 !important;
+  border: 1px solid #B9CAD8;
 }}
 
-/* ═══ Typography ═══ */
-h1, h2, h3, h4 {{
-    font-family: '{FONT_DISPLAY}', '{FONT_BODY}', serif !important;
-    letter-spacing: 0 !important;
-}}
-h1 {{ color: {TEXT_MAIN} !important; font-weight: 600 !important; font-size: 1.55rem !important; }}
-h2 {{ color: {TEXT_MAIN} !important; font-weight: 500 !important; font-size: 1.15rem !important; }}
-h3 {{ color: {TEXT_SOFT} !important; font-weight: 500 !important; font-size: 1rem !important; }}
-
-.stCaption {{
-    font-family: '{FONT_BODY}', sans-serif !important;
-    color: {TEXT_MUTED} !important;
-    font-size: 0.82rem !important;
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) * {{
+  color: #111820 !important;
+  font-weight: 650 !important;
 }}
 
-/* ═══ Metric cards ═══ */
+.block-container {{
+  padding-top: 1.2rem !important;
+  max-width: 1500px;
+}}
+
+h1, h2, h3, h4, p, div, span, label {{
+  letter-spacing: 0 !important;
+}}
+
+h1 {{
+  font-size: 1.55rem !important;
+  font-weight: 760 !important;
+  color: var(--bagi-ink) !important;
+  margin-bottom: 0.2rem !important;
+}}
+
+h2 {{
+  font-size: 1.15rem !important;
+  font-weight: 700 !important;
+  color: var(--bagi-ink) !important;
+}}
+
+h3 {{
+  font-size: 0.98rem !important;
+  font-weight: 700 !important;
+  color: var(--bagi-text) !important;
+}}
+
+.page-kicker {{
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--bagi-line);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.72);
+  color: var(--bagi-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}}
+
+.bagi-panel {{
+  background: var(--bagi-panel);
+  border: 1px solid var(--bagi-line);
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 8px 28px rgba(24,32,42,0.045);
+}}
+
+.bagi-panel-tight {{
+  background: var(--bagi-panel);
+  border: 1px solid var(--bagi-line);
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+}}
+
+.section-title {{
+  color: var(--bagi-ink);
+  font-size: 0.9rem;
+  font-weight: 760;
+  margin-bottom: 0.45rem;
+}}
+
+.section-note {{
+  color: var(--bagi-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}}
+
+.bagi-badge {{
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--badge-color), white 62%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--badge-color), white 88%);
+  color: var(--badge-color);
+  font-size: 0.72rem;
+  font-weight: 720;
+  white-space: nowrap;
+}}
+
+.status-pill {{
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--status-color), white 90%);
+  color: var(--status-color);
+  font-size: 0.75rem;
+  font-weight: 760;
+}}
+
+.status-pill span {{
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--status-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-color), white 78%);
+}}
+
+.intel-card {{
+  border-left: 3px solid var(--bagi-accent);
+  padding: 0.72rem 0.82rem;
+  background: #FFFFFF;
+  border-radius: 0 8px 8px 0;
+  border-top: 1px solid var(--bagi-line);
+  border-right: 1px solid var(--bagi-line);
+  border-bottom: 1px solid var(--bagi-line);
+}}
+
+.mono {{
+  font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+}}
+
 [data-testid="stMetric"] {{
-    background: {BG_CARD};
-    border: 1px solid {BORDER};
-    border-radius: 8px;
-    padding: 1rem 1.2rem;
-    box-shadow: 0 1px 2px rgba(30,27,24,0.03);
-    transition: all 0.2s;
+  background: var(--bagi-panel);
+  border: 1px solid var(--bagi-line);
+  border-radius: 8px;
+  padding: 0.78rem 0.9rem;
 }}
-[data-testid="stMetric"]:hover {{
-    box-shadow: 0 4px 16px rgba(30,27,24,0.05);
-    border-color: {GOLD};
-}}
+
 [data-testid="stMetric"] label {{
-    color: {TEXT_MUTED} !important;
-    font-size: 0.7rem !important;
-    font-weight: 500;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-family: '{FONT_BODY}', sans-serif !important;
+  color: var(--bagi-muted) !important;
+  font-size: 0.72rem !important;
+  font-weight: 720;
 }}
+
 [data-testid="stMetricValue"] {{
-    color: {TEXT_MAIN} !important;
-    font-size: 1.75rem !important;
-    font-weight: 550 !important;
-    font-family: '{FONT_MONO}', monospace !important;
+  color: var(--bagi-ink) !important;
+  font-size: 1.45rem !important;
+  font-weight: 780 !important;
 }}
 
-/* ═══ Tables ═══ */
-[data-testid="stDataFrame"] {{
-    border: 1px solid {BORDER};
-    border-radius: 8px;
-    overflow: hidden;
-}}
-[data-testid="stDataFrame"] th {{
-    background: {BG_SIDEBAR} !important;
-    color: {TEXT_SOFT} !important;
-    font-weight: 500 !important;
-    font-size: 0.76rem !important;
-    padding: 0.5rem 0.75rem !important;
-    font-family: '{FONT_BODY}', sans-serif !important;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-}}
-[data-testid="stDataFrame"] td {{
-    font-size: 0.83rem !important;
-    padding: 0.4rem 0.75rem !important;
-    border-bottom: 1px solid {DIVIDER} !important;
-    font-family: '{FONT_BODY}', sans-serif !important;
-}}
-[data-testid="stDataFrame"] tbody tr:hover td {{
-    background: {BG_BASE} !important;
-}}
-
-/* ═══ Buttons ═══ */
 .stButton > button {{
-    background: {INK};
-    color: {WHITE};
-    border: none;
-    border-radius: 6px;
-    padding: 0.45rem 1.2rem;
-    font-weight: 500;
-    font-size: 0.85rem;
-    transition: all 0.15s;
-    font-family: '{FONT_BODY}', sans-serif !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--bagi-accent) !important;
+  background: var(--bagi-accent) !important;
+  color: white !important;
+  min-height: 36px;
+  font-weight: 720 !important;
 }}
+
 .stButton > button:hover {{
-    background: {SAGE_DARK};
-    box-shadow: 0 4px 12px rgba(95,118,91,0.25);
+  background: var(--bagi-accent-dark) !important;
+  border-color: var(--bagi-accent-dark) !important;
 }}
+
 .stButton > button[kind="secondary"] {{
-    background: transparent;
-    color: {TEXT_SOFT};
-    border: 1px solid {BORDER};
-}}
-.stButton > button[kind="secondary"]:hover {{
-    background: {BG_CARD};
-    color: {TEXT_MAIN};
-    border-color: {GOLD};
-    box-shadow: none;
+  background: #FFFFFF !important;
+  color: var(--bagi-text) !important;
+  border-color: var(--bagi-line) !important;
 }}
 
-/* ═══ Inputs ═══ */
-.stTextInput input, .stSelectbox > div > div {{
-    border-color: {BORDER} !important;
-    border-radius: 6px !important;
-    font-family: '{FONT_BODY}', sans-serif !important;
-}}
-.stTextInput input:focus {{
-    border-color: {INK} !important;
-    box-shadow: 0 0 0 1px {INK} !important;
-}}
-div[data-baseweb="popover"] {{
-    border-color: {BORDER} !important;
-    border-radius: 6px !important;
-}}
-div[data-baseweb="popover"] [role="option"]:hover > div {{
-    background: {BG_BASE} !important;
-}}
-div[data-baseweb="popover"] [aria-selected="true"] > div {{
-    background: {BG_SIDEBAR} !important;
+.stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] {{
+  border-radius: 6px !important;
 }}
 
-/* ═══ Tabs ═══ */
+[data-testid="stDataFrame"] {{
+  border: 1px solid var(--bagi-line);
+  border-radius: 8px;
+  overflow: hidden;
+}}
+
 .stTabs [data-baseweb="tab-list"] {{
-    gap: 0;
-    border-bottom: 1px solid {DIVIDER};
+  gap: 4px;
+  border-bottom: 1px solid var(--bagi-line);
 }}
+
 .stTabs [data-baseweb="tab"] {{
-    color: {TEXT_MUTED};
-    font-weight: 500;
-    font-size: 0.84rem;
-    padding: 0.45rem 1rem;
-    border-radius: 4px 4px 0 0;
-    font-family: '{FONT_BODY}', sans-serif !important;
+  border-radius: 6px 6px 0 0;
+  color: var(--bagi-muted);
+  font-weight: 720;
 }}
+
 .stTabs [aria-selected="true"] {{
-    color: {TEXT_MAIN};
-    background: {BG_CARD};
-    border: 1px solid {DIVIDER};
-    border-bottom-color: {BG_CARD};
-}}
-
-/* ═══ Divider ═══ */
-hr {{
-    border-color: {DIVIDER} !important;
-    margin: 1rem 0 !important;
-}}
-
-/* ═══ Badges ═══ */
-.badge-high {{
-    background: {ROSE}; color: white; padding: 2px 10px;
-    border-radius: 10px; font-size: 0.72rem; font-weight: 500;
-    display: inline-block; letter-spacing: 0.03em;
-}}
-.badge-critical {{
-    background: {ROSE_DARK}; color: white; padding: 2px 10px;
-    border-radius: 10px; font-size: 0.72rem; font-weight: 500;
-    display: inline-block; letter-spacing: 0.03em;
-}}
-.badge-normal {{
-    background: {SAGE}; color: white; padding: 2px 10px;
-    border-radius: 10px; font-size: 0.72rem; font-weight: 500;
-    display: inline-block; letter-spacing: 0.03em;
-}}
-
-/* ═══ Info callout ═══ */
-[data-testid="stInfo"] {{
-    background: {BG_CARD};
-    border-left: 3px solid {INK};
-    color: {TEXT_SOFT};
-    border-radius: 4px;
-}}
-
-/* ═══ Expander ═══ */
-.streamlit-expanderHeader {{
-    font-family: '{FONT_BODY}', sans-serif !important;
-    color: {TEXT_SOFT} !important;
-}}
-
-/* ═══ Scrollbar ═══ */
-::-webkit-scrollbar {{ width: 4px; }}
-::-webkit-scrollbar-track {{ background: transparent; }}
-::-webkit-scrollbar-thumb {{ background: {BORDER}; border-radius: 2px; }}
-
-/* ═══ Spinner ═══ */
-.stSpinner > div {{
-    border-color: {INK} transparent transparent transparent !important;
-}}
-
-/* ═══ Dossier card utility class ═══ */
-.dossier-card {{
-    background: {BG_CARD};
-    border: 1px solid {BORDER};
-    border-radius: 8px;
-    padding: 1rem 1.2rem;
-    box-shadow: 0 1px 3px rgba(30,27,24,0.03);
-    transition: box-shadow 0.2s;
-}}
-.dossier-card:hover {{
-    box-shadow: 0 4px 16px rgba(30,27,24,0.06);
-}}
-
-/* ═══ Empty state ═══ */
-.empty-state {{
-    text-align: center;
-    padding: 3rem 2rem;
-    background: {BG_CARD};
-    border: 1px solid {BORDER};
-    border-radius: 10px;
-    color: {TEXT_MUTED};
-}}
-.empty-state .icon {{
-    font-size: 2rem;
-    margin-bottom: 0.8rem;
-    opacity: 0.5;
-}}
-.empty-state .title {{
-    font-family: '{FONT_DISPLAY}', serif !important;
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: {TEXT_SOFT};
-    margin-bottom: 0.3rem;
-}}
-.empty-state .desc {{
-    font-size: 0.82rem;
+  background: white;
+  color: var(--bagi-ink) !important;
 }}
 </style>
 """
-
-
-def badge(p: str) -> str:
-    if p == "critical": return '<span class="badge-critical">CRITICAL</span>'
-    if p == "high":     return '<span class="badge-high">HIGH</span>'
-    return '<span class="badge-normal">NORMAL</span>'
-
-
-def empty(icon: str, title: str, desc: str) -> str:
-    return f'<div class="empty-state"><div class="icon">{icon}</div><div class="title">{title}</div><div class="desc">{desc}</div></div>'

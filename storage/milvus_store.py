@@ -22,6 +22,14 @@ class MilvusStore:
         )
         self._connected = True
 
+    def healthcheck(self) -> bool:
+        """Return True when Milvus is reachable and the main collections exist."""
+        self._connect()
+        return (
+            utility.has_collection("slang_embeddings")
+            and utility.has_collection("intel_embeddings")
+        )
+
     # ------------------------------------------------------------------
     # Init collections
     # ------------------------------------------------------------------
@@ -64,6 +72,7 @@ class MilvusStore:
         )
     @property
     def slang_col(self):
+        self._connect()
         if self._slang_col is None:
             name = "slang_embeddings"
             if utility.has_collection(name):
@@ -74,6 +83,7 @@ class MilvusStore:
 
     @property
     def intel_col(self):
+        self._connect()
         if self._intel_col is None:
             name = "intel_embeddings"
             if utility.has_collection(name):

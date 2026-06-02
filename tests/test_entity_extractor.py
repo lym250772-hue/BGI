@@ -71,3 +71,26 @@ def test_extract_l1_l2_only_no_llm(extractor):
     assert "phone" in types
     assert "slang" in types
     assert "llm" not in methods  # LLM must not be used
+
+
+def test_normalize_slang_candidate_dict(extractor):
+    candidate = extractor._normalize_slang_candidate(
+        {
+            "term": "白资",
+            "suggested_meaning": "疑似可用于实名注册的账号资料",
+            "reason": "周围出现交易和接码语境",
+            "confidence": 0.82,
+            "evidence": "白资大量出，接码稳定",
+        },
+        "白资大量出，接码稳定",
+    )
+    assert candidate["term"] == "白资"
+    assert candidate["confidence"] == 0.82
+    assert "实名注册" in candidate["suggested_meaning"]
+
+
+def test_normalize_slang_candidate_string(extractor):
+    candidate = extractor._normalize_slang_candidate("白资", "白资大量出，接码稳定")
+    assert candidate["term"] == "白资"
+    assert candidate["suggested_meaning"] == "待人工确认"
+    assert "白资" in candidate["evidence"]
