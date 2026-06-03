@@ -241,19 +241,25 @@ class DouyinSearchSpider(BaseSpider):
         checkpoint_cb = kwargs.get("checkpoint_callback")
         all_items = []
         consecutive_empty = 0
+        self._search_id = ""  # 重置 search_id（每个关键词独立）
 
-        # 首页建立会话 + 通过搜索框触发搜索（绕过直接/search/ URL的验证码）
-        # 注意：抖音首页导航流程特殊，断点仅支持关键词级恢复，不支持中间页跳转
+        # 🆕 优先使用 API 直调（page.evaluate fetch），失败后回退首页搜索框
         for page_num in range(start_page, max_pages + 1):
             logger.info(f"搜索 [{keyword}] 第{page_num}/{max_pages}页")
 
             try:
-                if page_num == 1:
-                    # 第一页：从首页搜索框进入（内部已调用 _parse_search_page_dom）
-                    items = self._search_via_homepage(keyword)
+                # 方式1: API 直调（快速、可靠）
+                items = self._call_search_api(keyword, page_num)
+                if items:
+                    logger.debug(f"  API 直调获取 {len(items)} 条")
                 else:
-                    # 后续页：滚动加载
-                    items = self._scroll_for_more(keyword)
+                    # 方式2: 回退到首页搜索框 + body 正则（仅第1页）
+                    if page_num == 1:
+                        logger.debug("  API 无数据，回退首页搜索框方案")
+                        items = self._search_via_homepage(keyword)
+                    else:
+                        logger.debug("  API 无数据且非首页，跳过")
+                        break
 
                 new_count = 0
                 for item in items:
@@ -281,7 +287,7 @@ class DouyinSearchSpider(BaseSpider):
             except Exception as exc:
                 logger.error(f"  第{page_num}页失败: {exc}")
                 self.stats["errors"] += 1
-                time.sleep(3.0 + random.random() * 2.0)
+                time.sleep(random.uniform(3.0, 6.0))
                 continue
 
             if checkpoint_cb:
@@ -320,19 +326,31 @@ class DouyinSearchSpider(BaseSpider):
                 self._page.goto(self.HOME_URL, wait_until="domcontentloaded", timeout=15000)
                 time.sleep(2.0)
 
-        # 步骤2: JS 移除遮罩
-        self._page.evaluate("() => { document.querySelectorAll('[class*=\"mask\"], [class*=\"overlay\"], [class*=\"dialog\"], [class*=\"modal\"]').forEach(m => m.remove()); }")
+        # 步骤2: 移除遮罩 + 关闭信任登录弹窗
+        self._page.evaluate('''
+        () => {
+            // 关闭 trust-logout-dialog
+            const trustDialog = document.querySelector('#trust-logout-dialog');
+            if (trustDialog) trustDialog.remove();
+            // 移除各类遮罩
+            document.querySelectorAll('[class*="mask"], [class*="overlay"], [class*="dialog"], [class*="modal"]')
+                .forEach(m => m.remove());
+        }
+        ''')
+        time.sleep(1.0)
 
         # 步骤3: Playwright 原生键盘操作 — 点搜索框 → 输入 → Enter
-        # 先点页面中间确保焦点
         self._page.mouse.click(500, 300)
         time.sleep(0.5)
 
-        # 点击搜索框
+        # 点击搜索框（用 JS 直接 focus 避免被遮罩挡住）
         try:
-            self._page.locator('input').first.click(timeout=5000)
+            self._page.locator('input[placeholder*="搜索"]').first.click(timeout=5000)
         except Exception:
-            self._page.mouse.click(700, 30)
+            try:
+                self._page.evaluate('() => { const inp = document.querySelector("input[placeholder*=\\"搜索\\"]"); if (inp) inp.focus(); }')
+            except Exception:
+                self._page.mouse.click(700, 30)
             time.sleep(0.5)
 
         # 输入 + 回车
