@@ -277,6 +277,7 @@ class XiaohongshuSearchSpider(BaseSpider):
                     .filter(f => f.modelType === 'note' && f.noteCard)
                     .map(f => ({
                         id: f.id || '',
+                        xsecToken: f.xsecToken || '',
                         displayTitle: f.noteCard.displayTitle || '',
                         desc: f.noteCard.desc || '',
                         type: f.noteCard.type || '',
@@ -300,6 +301,9 @@ class XiaohongshuSearchSpider(BaseSpider):
                 if not note_id or note_id in seen_ids:
                     continue
                 seen_ids.add(note_id)
+
+                # 🆕 xsecToken（访问完整笔记需要的安全令牌）
+                xsec_token = r.get('xsecToken', '')
 
                 # 标题 + 描述
                 title = (r.get('displayTitle') or '').strip()
@@ -365,10 +369,15 @@ class XiaohongshuSearchSpider(BaseSpider):
                     self.ts_to_datetime(time_ts) if time_ts else datetime.utcnow()
                 )
 
+                # 构建 URL（带 xsec_token 才能直接访问）
+                source_url = f'https://www.xiaohongshu.com/explore/{note_id}'
+                if xsec_token:
+                    source_url += f'?xsec_token={xsec_token}'
+
                 item = ParsedXiaohongshuItem(
                     content_raw=content_raw,
                     content_type=content_type,
-                    source_url=f'https://www.xiaohongshu.com/explore/{note_id}',
+                    source_url=source_url,
                     author_uid=author_id,
                     author_username=author_name,
                     note_id=note_id,
@@ -389,6 +398,7 @@ class XiaohongshuSearchSpider(BaseSpider):
                         'like_count': like_count,
                         'collect_count': collect_count,
                         'comment_count': comment_count,
+                        'xsec_token': xsec_token,
                     },
                 )
                 items.append(item)
