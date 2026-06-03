@@ -594,109 +594,64 @@ class DouyinSearchSpider(BaseSpider):
     # ═══════════════════════════════════════════════════════════════════════════
 
     def _call_search_api(self, keyword: str, page: int = 1) -> list[ParsedDouyinItem]:
-        """🆕 纯 HTTP 搜索 API（X-Bogus 签名，无需 Playwright fetch）。"""
+        """搜索 API — Playwright fetch + X-Bogus（保持浏览器指纹一致）。"""
         offset = (page - 1) * 10
-        encoded = quote(keyword)
 
-        # 构建请求参数（对齐 douyin 浏览器请求）
+        # 构建请求参数
         params = [
-            ("device_platform", "webapp"),
-            ("aid", "6383"),
-            ("channel", "channel_pc_web"),
-            ("search_channel", "aweme_general"),
-            ("sort_type", "0"),
-            ("publish_time", "0"),
-            ("keyword", keyword),
-            ("search_source", "normal_search"),
-            ("query_correct_type", "1"),
-            ("is_filter_search", "0"),
-            ("from_group_id", ""),
-            ("offset", str(offset)),
-            ("count", "15"),
-            ("pc_client_type", "1"),
-            ("version_code", "190600"),
-            ("version_name", "19.6.0"),
+            ("device_platform", "webapp"), ("aid", "6383"), ("channel", "channel_pc_web"),
+            ("search_channel", "aweme_general"), ("sort_type", "0"), ("publish_time", "0"),
+            ("keyword", keyword), ("search_source", "normal_search"),
+            ("query_correct_type", "1"), ("is_filter_search", "0"), ("from_group_id", ""),
+            ("offset", str(offset)), ("count", "15"),
+            ("pc_client_type", "1"), ("version_code", "190600"), ("version_name", "19.6.0"),
             ("cookie_enabled", "true"),
-            ("screen_width", "1920"),
-            ("screen_height", "1080"),
-            ("browser_language", "zh-CN"),
-            ("browser_platform", "Win32"),
-            ("browser_name", "Edge"),
-            ("browser_version", "120.0.0.0"),
-            ("browser_online", "true"),
-            ("engine_name", "Blink"),
-            ("engine_version", "120.0.0.0"),
-            ("os_name", "Windows"),
-            ("os_version", "10"),
-            ("cpu_core_num", "16"),
-            ("device_memory", "8"),
-            ("platform", "PC"),
-            ("downlink", "10"),
-            ("effective_type", "4g"),
-            ("round_trip_time", "50"),
         ]
-
-        # 添加 msToken 和 webid
         if self._msToken:
             params.append(("msToken", self._msToken))
         if self._webid:
             params.append(("webid", self._webid))
 
-        # 生成 query string + X-Bogus
         query_string = "&".join(f"{k}={v}" for k, v in params)
         try:
-            xbogus = generate_xbogus(query_string)
-            query_string += f"&X-Bogus={xbogus}"
+            query_string += f"&X-Bogus={generate_xbogus(query_string)}"
         except Exception as e:
-            logger.warning(f"X-Bogus 生成失败: {e}，尝试无签名请求")
-            # 兜底：返回空让 search_and_parse 回退到首页方案
+            logger.warning(f"X-Bogus 生成失败: {e}")
             return []
 
-        url = f"{self.SEARCH_API}?{query_string}"
-
-        # 从 Playwright 获取最新 Cookie
-        page_cookies = self._context.cookies()
-        cookies_dict = {c['name']: c['value'] for c in page_cookies}
-
-        headers = {
-            "authority": "www.douyin.com",
-            "accept": "application/json, text/plain, */*",
-            "accept-language": "zh-CN,zh;q=0.9",
-            "referer": "https://www.douyin.com/",
-            "sec-ch-ua": '"Microsoft Edge";v="120", "Not;A=Brand";v="8", "Chromium";v="120"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Windows"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-origin",
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
-        }
-
-        try:
-            resp = requests.get(url, headers=headers, cookies=cookies_dict, timeout=15)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.warning(f"搜索 API 请求失败: {e}")
-            return []
-
+        # 🆕 在浏览器内用 fetch 调用（TLS 指纹一致 + Cookie 自动携带）
+        js_code = f"""
+        async () => {{
+            try {{
+                const url = 'https://www.douyin.com/aweme/v1/web/general/search/single/?{query_string}';
+                const resp = await fetch(url, {{
+                    method: 'GET', credentials: 'include',
+                    headers: {{ 'Accept': 'application/json', 'Referer': 'https://www.douyin.com/' }}
+                }});
+                if (!resp.ok) return {{ error: true, status: resp.status }};
+                return await resp.json();
+            }} catch(e) {{ return {{ error: true, message: e.message }}; }}
+        }}
+        """
+        result = self._page.evaluate(js_code)
         self.stats["pages_loaded"] += 1
         time.sleep(random.uniform(self.MIN_DELAY, self.MAX_DELAY))
 
-        # 解析响应
-        items_data = data.get("data", [])
+        if not result or result.get("error"):
+            return []
+
+        items_data = result.get("data", [])
         if not isinstance(items_data, list):
             items_data = []
 
         items = []
         for item_data in items_data:
-            if item_data.get("type") != 1:  # type=1 是视频
+            if item_data.get("type") != 1:
                 continue
             aweme = item_data.get("aweme_info", item_data)
             parsed = self._parse_aweme(aweme, keyword)
             if parsed:
                 items.append(parsed)
-
         return items
 
     # ═══════════════════════════════════════════════════════════════════════════

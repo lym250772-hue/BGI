@@ -10,12 +10,11 @@
 | `zhihu_sample.json` | 知乎 | 169 | 刷单/接码/账号出售 | 纯HTTP API | 含答案+评论、话题标签 |
 | `tieba_sample.json` | 贴吧 | **171** 🚀 | 刷单/接码/账号出售 | **JSON API (~10条/秒)** | 含图片、吧名、回复数 |
 | `xiaohongshu_sample.json` | 小红书 | **188** 🆕 | 刷单/接码/账号出售 | **SSR提取 (window.__INITIAL_STATE__)** | 含图片、互动数据 |
-| `douyin_sample.json` | 抖音 | ⚠️ Spider待修 | — | Playwright 首页搜索+正则 | 含图片列表、视频封面、点赞/分享数 |
+| `douyin_sample.json` | 抖音 | **73** 🆕 | 刷单/无人直播/账号出售 | **可见浏览器+fetch API (X-Bogus)** | 含点赞/评论数、作者、视频封面 |
 | `telegram_sample.json` | Telegram | — | — | Telethon（需 API ID/Hash） | 待配置 |
 
-> **合计**: 701 条 / ~1.5MB / 4 平台（2026-06-03 更新，统一 IntelItem 格式）
-> 小红书从 API拦截改为 SSR 提取（window.__INITIAL_STATE__），解决登录后内容为空的问题
-> 抖音需 `python login_edge.py douyin` + Spider修复
+> **合计**: 774 条 / ~1.6MB / 5 平台（2026-06-03 最终版，统一格式）
+> 🎉 全部5平台采集打通！抖音使用可见浏览器+fetch API(X-Bogus签名)
 
 ## 🆕 贴吧 API 突破
 
