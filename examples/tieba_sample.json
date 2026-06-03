@@ -1,6 +1,6 @@
 {
   "platform": "tieba",
-  "collected_at": "2026-06-03T09:52:27.272763+00:00",
+  "collected_at": "2026-06-03T14:41:07.252408+00:00",
   "keywords": [
     "714高炮",
     "AB贷",
@@ -68,7 +68,38 @@
       "comment_count": 77,
       "share_count": 0,
       "collect_count": 0,
-      "comments": [],
+      "comments": [
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "肖呢～",
+          "content": "我的都停了好久了，家里人一直不知道04-16 四川 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "婆婆计popo",
+          "content": "这个可以处理的04-07 湖北 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "兮兮久子酱",
+          "content": "怎么下载啊04-08 新疆 14 回复来04-15 河北 赞 回复回复  贴吧用户_Qb1UZ4Q  :怎么来04-18 四川 5 回复回复  贴吧用户_Qb1UZ4Q  :怎么下载04-24 江苏 赞 回复展开 4 条回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        }
+      ],
       "tags": [
         "逾期交流"
       ],
@@ -99,7 +130,28 @@
       "comment_count": 35,
       "share_count": 0,
       "collect_count": 0,
-      "comments": [],
+      "comments": [
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "还没睡醒的状态",
+          "content": "714真的好恶心，逾期当天就疯了一样给你打电话，打你通讯录的04-28 广东 赞 回复爆了几天？05-28 浙江 赞 回复回复  稳稳稳闻  :那时候爆了3天吧，还款后还是爆了，无语的死，给那边客服打电话，他说欠钱不还还这样的态度05-31 广东 赞 回复回复  还没睡醒的状态  : 还款还爆，那你还个屁05-31 浙江 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "无言的猜忌",
+          "content": "卧槽了，刚用银行卡发现用不了。全tm用不了了04-10 江苏 1 回复问问 啥平台起诉你的04-10 江苏 2 回复回复  赊云风雪梨  :刚给法院打电话了，说的那个平台倒了，现在被什么什么的没听清楚，要我把本金还到法院。04-10 江苏 赞 回复回复  无言的猜忌  :这也太变态了 本金多少啊04-10 江苏 赞 回复回复  赊云风雪梨  :两个平台285004-10 江苏 1 回复展开 10 条回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        }
+      ],
       "tags": [
         "微信支付限制"
       ],
@@ -130,7 +182,78 @@
       "comment_count": 66,
       "share_count": 0,
       "collect_count": 0,
-      "comments": [],
+      "comments": [
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "深圳挂壁仔",
+          "content": "这个是早上闪电的机器人打来的电话，问我是不是某某，然后逾期还钱啥的。第2楼 2024-07-08 广东 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "无趣之心",
+          "content": "带任何致电回复的都是催收手段，别鸟他第4楼 2024-07-08 广东 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "南洋通",
+          "content": "换个牌子的催收组织，叼他个毛第5楼 2024-07-08 广东 1 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "是团不是借",
+          "content": "是个√⑧第7楼 2024-07-08 广东 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "深圳挂壁仔",
+          "content": "好像是7天，砍头利息200，不是14天第10楼 2024-07-08 广东 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "给个机会好吗😲",
+          "content": "假的吧！ 广西壮族自治区 给你打 电话上海区位第11楼 2024-07-08 1 回复开始是个上海的机器人打过来，下午是这一天短信2024-07-08 广东 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "深圳挂壁仔",
+          "content": "有没有老哥查一下这个短信代码的来源吗第12楼 2024-07-08 广东 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        }
+      ],
       "tags": [
         "龙华"
       ],
@@ -162,7 +285,58 @@
       "comment_count": 6,
       "share_count": 0,
       "collect_count": 0,
-      "comments": [],
+      "comments": [
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "香菜软糖甜心小熊",
+          "content": "你都借高利贷了还介意催收，你是还打算还吗？第2楼 03-14 四川 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "超级孙鹏飞",
+          "content": "兄弟，这种我也遇到过，千万别信，都是割韭菜的。第3楼 03-14 天津 赞 回复怎么割法？04-21 广东 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "幻想鄉鄉長",
+          "content": "最多三个月，三个月后就换下一家催收公司了第4楼 03-15 广西 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "小羊不放弃",
+          "content": "原来我也不懂 后来进了一个负债👗 感觉心情都好多了 大家聊聊天 我也知道了很多第5楼 03-15 辽宁 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        },
+        {
+          "id": "",
+          "author_uid": "",
+          "author_username": "小妖桃之妖妖",
+          "content": "你我贷就是个垃圾平台，昨天逾期第一天，也打电话给客服说了真实的困难与还款意愿，平台说没有政策，可以缓催。结果从放下官方电话开始，各种电话与短信暴风雨一样袭来，各种恐吓，逼迫，讽刺……以前只是听说你我贷暴力催收，我以为只是针对恶意逾期或者失联的客户，现在看来不是，无论你有多大困难，无论你的还款意愿有多真诚，他们一样不给你喘息机会，哪怕只是逾期一天，哪怕只有几百元欠款，她们能把这世界上最恶毒最刻薄的话说出来。更可笑的是他们还冒充上海地方金融管理局给我打电话，说跟他们投诉是不对的。最后我妥协了，硬着头皮用高利贷结清了当期账单，倒不是怕她们都恶言恶语，是怕影响到我的朋友和同事，他们什么都做的出来。我很奇怪，这样的垃圾平台为什么国家不出手，本地也不监管？！！！第6楼 04-30 吉林 赞 回复",
+          "like_count": 0,
+          "reply_to": "",
+          "created_at": "",
+          "type": "reply"
+        }
+      ],
       "tags": [
         "逾期负债"
       ],
