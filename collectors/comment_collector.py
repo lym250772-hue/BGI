@@ -140,7 +140,7 @@ def fetch_xiaohongshu_comments(page, note_id: str, xsec_token: str = "",
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def fetch_tieba_replies(page, thread_id: str, max_pages: int = 3) -> list[dict]:
-    """打开贴吧帖子页，从 DOM 提取回复。"""
+    """打开贴吧帖子页，从 DOM 提取回复（使用已验证的旧版 Spider 选择器）。"""
     replies = []
 
     for pn in range(1, max_pages + 1):
@@ -149,32 +149,53 @@ def fetch_tieba_replies(page, thread_id: str, max_pages: int = 3) -> list[dict]:
             if pn > 1:
                 url += f"?pn={pn}"
 
-            if pn == 1:
-                page.goto(url, wait_until="domcontentloaded", timeout=20000,
-                          referer="https://tieba.baidu.com/index.html")
-            else:
-                page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            page.goto(url, wait_until="domcontentloaded", timeout=20000,
+                      referer="https://tieba.baidu.com/index.html")
+
+            # 等待帖子内容渲染
+            try:
+                page.wait_for_selector("div.l_post, div.d_post_content", timeout=10000)
+            except Exception:
+                pass
             time.sleep(2)
 
-            # 从 DOM 提取回复（跳过主帖）
+            # 使用已验证的 DOM 提取逻辑（来自 tieba_spider.py）
             raw = page.evaluate("""
             () => {
                 var results = [];
-                document.querySelectorAll('.l_post, [class*="post"], div.d_post_content').forEach(function(el) {
-                    var text = el.innerText?.trim() || '';
-                    if (text.length > 2) results.push(text);
-                });
-                // 跳过第1条（主帖）
-                return results.slice(1);
+                var posts = document.querySelectorAll('div.l_post');
+                // 跳过第1个（主帖）
+                for (var i = 1; i < posts.length; i++) {
+                    var post = posts[i];
+                    var content = '';
+                    var contentEl = post.querySelector('.d_post_content, [class*=\"post_content\"]');
+                    if (contentEl) content = contentEl.innerText.trim();
+                    if (!content) continue;
+
+                    var author = '';
+                    var authorEl = post.querySelector('.d_author a, [class*=\"author\"]');
+                    if (authorEl) author = authorEl.innerText.trim();
+
+                    var floor = '';
+                    var floorEl = post.querySelector('.tail-info');
+                    if (floorEl) floor = floorEl.innerText.replace('楼', '').trim();
+
+                    results.push({
+                        author_username: author,
+                        content: content.substring(0, 500),
+                        floor: parseInt(floor) || 0,
+                    });
+                }
+                return results;
             }
             """)
 
-            for text in raw:
-                if text and text not in [r["content"] for r in replies]:
-                    replies.append(make_unified_comment(
-                        content=text[:500],
-                        comment_type="reply",
-                    ))
+            for r in raw:
+                replies.append(make_unified_comment(
+                    author_username=r.get("author_username", ""),
+                    content=r.get("content", ""),
+                    comment_type="reply",
+                ))
 
             if len(raw) < 20:
                 break
@@ -192,83 +213,82 @@ def fetch_tieba_replies(page, thread_id: str, max_pages: int = 3) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def fetch_douyin_comments(page, aweme_id: str, max_pages: int = 3) -> list[dict]:
-    """打开抖音视频页，截获评论 API 响应。"""
+    """打开抖音视频页，通过响应拦截截获评论 API（自动带 X-Bogus 签名）。
+
+    必须使用可见浏览器（headless=False），否则 hit_shark。
+    参考: DrissionPage 浏览器自动化方案
+    """
     comments = []
 
     for pn in range(max_pages):
+        captured = []
+
+        def on_response(response):
+            if "/comment/list/" in response.url and f"aweme_id={aweme_id}" in response.url:
+                try:
+                    body = response.json()
+                    if body.get("comments"):
+                        captured.append(body)
+                except Exception:
+                    pass
+
         try:
+            page.on("response", on_response)
+
             if pn == 0:
                 url = f"https://www.douyin.com/video/{aweme_id}"
                 page.goto(url, wait_until="domcontentloaded", timeout=20000,
                           referer="https://www.douyin.com/")
                 time.sleep(4)
+                # 滚动触发评论加载
+                page.evaluate("window.scrollBy(0, 800)")
+                time.sleep(3)
+            else:
+                # 翻页：滚动到底部
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(3)
 
-            cursor = "0" if pn == 0 else str(pn * 20)
-            raw = page.evaluate(f"""
-            async () => {{
-                try {{
-                    var url = 'https://www.douyin.com/aweme/v1/web/comment/list/'
-                        + '?aweme_id={aweme_id}&cursor={cursor}&count=20&item_type=0';
-                    var r = await fetch(url, {{
-                        method: 'GET', credentials: 'include',
-                        headers: {{ 'Accept': 'application/json', 'Referer': 'https://www.douyin.com/video/{aweme_id}' }}
-                    }});
-                    var d = await r.json();
-                    var list = d.comments || [];
-                    return list.map(function(c) {{
-                        return {{
-                            id: c.cid || '',
-                            content: c.text || '',
-                            author_uid: c.user?.uid || '',
-                            author_username: c.user?.nickname || '',
-                            like_count: c.digg_count || 0,
-                            create_time: c.create_time || 0,
-                            replies: (c.reply_comment || []).map(function(r) {{
-                                return {{
-                                    id: r.cid || '',
-                                    content: r.text || '',
-                                    author_uid: r.user?.uid || '',
-                                    author_username: r.user?.nickname || '',
-                                    like_count: r.digg_count || 0,
-                                }};
-                            }}),
-                        }};
-                    }});
-                }} catch(e) {{ return []; }}
-            }}
-            """)
+            page.remove_listener("response", on_response)
 
-            if not raw:
+            if not captured:
                 break
 
-            for c in raw:
+            raw_comments = captured[0].get("comments", [])
+            for c in raw_comments:
+                user = c.get("user", {}) or {}
                 comments.append(make_unified_comment(
-                    id=c.get("id", ""),
-                    author_uid=str(c.get("author_uid", "")),
-                    author_username=c.get("author_username", ""),
-                    content=c.get("content", ""),
-                    like_count=c.get("like_count", 0),
+                    id=str(c.get("cid", "")),
+                    author_uid=str(user.get("uid", "")),
+                    author_username=user.get("nickname", ""),
+                    content=c.get("text", ""),
+                    like_count=c.get("digg_count", 0),
                     created_at=str(c.get("create_time", "")),
                     comment_type="comment",
                 ))
-                for r in c.get("replies", []):
+                # 回复的回复
+                for r in c.get("reply_comment", []) or []:
+                    ruser = r.get("user", {}) or {}
                     comments.append(make_unified_comment(
-                        id=r.get("id", ""),
-                        author_uid=str(r.get("author_uid", "")),
-                        author_username=r.get("author_username", ""),
-                        content=r.get("content", ""),
-                        like_count=r.get("like_count", 0),
-                        created_at="",
+                        id=str(r.get("cid", "")),
+                        author_uid=str(ruser.get("uid", "")),
+                        author_username=ruser.get("nickname", ""),
+                        content=r.get("text", ""),
+                        like_count=r.get("digg_count", 0),
                         comment_type="reply",
                     ))
 
-            if len(raw) < 20:
+            if len(raw_comments) < 20:
                 break
 
-            time.sleep(random.uniform(1.0, 2.0))
+            time.sleep(random.uniform(1.5, 3.0))
         except Exception as e:
             logger.debug(f"  抖音评论第{pn+1}页失败: {e}")
             break
+        finally:
+            try:
+                page.remove_listener("response", on_response)
+            except Exception:
+                pass
 
     return comments
 
