@@ -1,6 +1,39 @@
 # BGI 变更日志
 
-## 2026-06-03 — 采集层恢复 + 示例数据更新
+## 2026-06-03 (下午) — 贴吧 JSON API 加速（~300x 提升）🆕
+
+### 🚀 贴吧从 Playwright → 纯 HTTP JSON API
+
+| 指标 | 旧方案 | 新方案 |
+|------|:--:|:--:|
+| 技术 | Playwright DOM 解析 | HTTP `requests` + JSON API |
+| 速度 | **0.03 条/秒** | **~10 条/秒** |
+| 提升 | — | **~300x** |
+| 内存 | ~400MB | ~50MB |
+
+### 🔍 发现的内部 API
+
+- 端点: `tieba.baidu.com/mo/q/search/multsearch`
+- 方法: GET，返回 JSON
+- 认证: Cookie（BDUSS + BAIDUID），**无需 sign 参数**
+- 数据: 完整主帖内容 + 作者 + 图片列表 + 回复数
+
+### 📁 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `collectors/spiders/tieba_api_spider.py` | 纯 HTTP API Spider，兼容旧 search_and_parse() 接口 |
+| `scripts/crawl/tieba_api_sniff.py` | API 抓包脚本（Playwright 网络拦截） |
+| `scripts/crawl/test_tieba_api.py` | 速度对比测试脚本 |
+
+### ⚠️ 已知限制
+
+- 回复 API (`c.tieba.baidu.com/c/f/pb`) 需额外签名，暂时不可用
+- 如需回复内容，可回退到旧 Playwright `tieba_spider.py`
+
+---
+
+## 2026-06-03 (上午) — 采集层恢复 + 示例数据更新
 
 ### ✏️ 恢复核心文件
 

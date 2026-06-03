@@ -6,28 +6,74 @@
 
 | 文件 | 平台 | 条数 | 关键词 | 采集技术 | 数据特点 |
 |------|------|:--:|------|------|------|
-| `weibo_sample.json` | 微博 | 380 | 刷单/接码/跑分/账号出售/代付 | AJAX API | 含评论(71条)、转发/点赞数 |
-| `zhihu_sample.json` | 知乎 | 375 | 刷单/接码/跑分/账号出售/代付 | 纯HTTP API | 含答案(145条)+评论(96条)、话题标签 |
-| `xiaohongshu_sample.json` | 小红书 | 180 | 刷单/接码/跑分 | Playwright API拦截+DOM | 含图片列表、收藏/评论数、标签 |
-| `douyin_sample.json` | 抖音 | 123 | 刷单/接码/跑分 | Playwright 首页搜索+正则 | 含图片列表、视频封面、点赞/分享数 |
-| `tieba_sample.json` | 贴吧 | 18 | 刷单/接码/跑分 | Playwright DOM解析 | 含帖子回复、吧名、thread_id |
+| `weibo_sample.json` | 微博 | 173 | 刷单/接码/账号出售 | AJAX API | 含评论、转发/点赞数 |
+| `zhihu_sample.json` | 知乎 | 169 | 刷单/接码/账号出售 | 纯HTTP API | 含答案+评论、话题标签 |
+| `tieba_sample.json` | 贴吧 | **171** 🚀 | 刷单/接码/账号出售 | **JSON API (~10条/秒)** | 含图片、吧名、回复数 |
+| `xiaohongshu_sample.json` | 小红书 | 36 | 刷单 | Playwright API拦截+DOM | 含图片列表、收藏/评论数、标签 |
+| `douyin_sample.json` | 抖音 | ⚠️ 待重登录 | 无人直播/刷单 | Playwright 首页搜索+正则 | 含图片列表、视频封面、点赞/分享数 |
 | `telegram_sample.json` | Telegram | — | — | Telethon（需 API ID/Hash） | 待配置 |
 
-> **合计**: 1,076 条 / 1.4MB / 5 平台
+> **合计**: 549 条 / ~1.5MB / 4 平台（2026-06-03 更新，统一 IntelItem 格式）
+> 抖音需 `python login_edge.py douyin` 重新登录后恢复采集
+
+## 🆕 贴吧 API 突破
+
+贴吧已从 Playwright DOM 解析（0.03条/秒）升级为纯 HTTP JSON API（~10条/秒），
+本次采集 166 条仅用 ~15 秒（旧方案需 ~90 分钟）。
+新 Spider: `collectors/spiders/tieba_api_spider.py`
+测试脚本: `python scripts/crawl/test_tieba_api.py`
 
 ## 数据格式
 
-每条数据遵循 `IntelItem` 格式（`collectors/base.py`），核心字段：
+**所有平台统一使用 `IntelItem` 格式**（`collectors/base.py` + `collectors/normalizer.py`）。
+
+### 统一字段结构
 
 ```json
 {
   "platform": "weibo",
+  "post_id": "5305700962275305",
   "content_raw": "原始正文内容...",
   "content_type": "text",
   "source_url": "https://weibo.com/...",
   "author_uid": "作者UID",
   "author_username": "作者昵称",
-  "collected_at": "2026-06-02T22:19:xx",
+  "collected_at": "2026-06-03T04:34:xx",
+  "like_count": 0,
+  "comment_count": 0,
+  "share_count": 0,
+  "collect_count": 0,
+  "comments": [
+    {
+      "id": "评论ID",
+      "author_uid": "",
+      "author_username": "评论者",
+      "content": "评论内容",
+      "like_count": 0,
+      "reply_to": "",
+      "created_at": "",
+      "type": "comment"
+    }
+  ],
+  "tags": ["标签1", "标签2"],
+  "image_urls": ["https://img1.jpg"],
+  "video_cover_url": "",
+  "metadata": { /* 平台特定字段 */ }
+}
+```
+
+### 各平台映射
+
+| 统一字段 | 微博 | 知乎 | 贴吧 | 小红书 | 抖音 |
+|------|------|------|------|------|------|
+| `post_id` | weibo_id | answer_id | thread_id | note_id | aweme_id |
+| `like_count` | attitudes_count | voteup_count | like_num | like_count | like_count |
+| `comment_count` | comments_count | comment_count | reply_count | comment_count | comment_count |
+| `comments` | ✅ 评论 | ✅ 答案+评论 | 🔲 预留 | 🔲 预留 | 🔲 预留 |
+| `tags` | — | topics | [bar_name] | tags | hashtags |
+| `image_urls` | — | image_list | image_urls | image_list | image_list |
+
+> 🔲 预留 = 评论采集暂未实现，字段已留好供后续接入
   "keyword": "刷单",
   "metadata": { "weibo_id": "...", "reposts_count": 0, ... }
 }

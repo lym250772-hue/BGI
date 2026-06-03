@@ -8,7 +8,7 @@ BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析�
 
 本项目覆盖采集 → 分析 → 展示的完整链路。
 
-- 采集层：5 渠道已打通（微博/知乎/小红书/抖音/贴吧），纯 HTTP + Playwright 双模式，产出统一 IntelItem 格式。支持评论采集和图片/封面 URL 提取。
+- 采集层：5 渠道已打通（微博/知乎/小红书/抖音/贴吧），纯 HTTP + Playwright 双模式，产出统一 IntelItem 格式。支持评论采集和图片/封面 URL 提取。**贴吧已从 Playwright 0.03条/秒提速至 HTTP JSON API ~10条/秒（300x）。**
 - 分析层：接收结构化数据，写入 MySQL，执行清洗、分类、实体抽取、黑话研判、图谱扩线、Doris 聚合和前端展示。
 - OCR/ASR：代码结构允许接入，图文 OCR 管道已实现（PaddleOCR）。
 - Java/Spring Boot：当前项目没有 Java 后端，控制面由 Python + FastAPI + Streamlit 承担。

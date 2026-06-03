@@ -16,13 +16,14 @@ import sys
 import time
 import argparse
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from loguru import logger
+from collectors.normalizer import normalize_items  # 🆕 统一格式
 
 logger.remove()
 logger.add(sys.stderr, level="INFO",
@@ -45,14 +46,16 @@ PLATFORM_CONFIG = {
         "count": 20,
     },
     "tieba": {
-        "spider": "playwright",
+        "spider": "http",  # 🆕 已升级为 JSON API
         "keyword": "刷单",
-        "max_pages": 2,
+        "max_pages": 3,
+        "count": 20,
     },
     "zhihu": {
-        "spider": "playwright",
+        "spider": "http",  # 🆕 使用纯 HTTP API Spider
         "keyword": "刷单",
         "max_pages": 2,
+        "count": 20,
     },
     "xiaohongshu": {
         "spider": "playwright",
@@ -80,8 +83,8 @@ def _serialize(obj):
     return obj
 
 
-def collect_weibo(keyword: str, max_pages: int, fetch_comments: bool = True) -> list[dict]:
-    """Collect from Weibo (pure HTTP API, no browser)."""
+def collect_weibo(keyword: str, max_pages: int, fetch_comments: bool = True) -> list:
+    """Collect from Weibo (pure HTTP API, no browser). Returns parsed items + comments in metadata."""
     from collectors.spiders.weibo_api_spider import WeiboAPISpider
 
     spider = WeiboAPISpider()
@@ -90,12 +93,11 @@ def collect_weibo(keyword: str, max_pages: int, fetch_comments: bool = True) -> 
         logger.info("[weibo] Searching: {} (max_pages={})", keyword, max_pages)
         parsed = spider.search(keyword, max_pages=max_pages)
         for item in parsed:
-            d = _serialize(item)
-            # 采集评论
+            # 采集评论，存到 metadata.comments（normalize_weibo 会读取）
             if fetch_comments and item.comments_count > 0:
                 try:
                     comments = spider.get_comments(item.weibo_id, max_pages=2)
-                    d.setdefault("metadata", {})["comments"] = [
+                    item.metadata["comments"] = [
                         {"id": c.get("id", ""),
                          "author": (c.get("user", {}) or {}).get("screen_name", ""),
                          "text": c.get("text_raw", "") or c.get("text", ""),
@@ -104,7 +106,7 @@ def collect_weibo(keyword: str, max_pages: int, fetch_comments: bool = True) -> 
                     ]
                 except Exception:
                     pass
-            all_items.append(d)
+            all_items.append(item)  # Keep as ParsedWeiboAPIItem object
         logger.info("[weibo] {} items collected", len(all_items))
     finally:
         if spider._session:
@@ -112,13 +114,42 @@ def collect_weibo(keyword: str, max_pages: int, fetch_comments: bool = True) -> 
     return all_items
 
 
-def collect_playwright(platform: str, keyword: str, max_pages: int) -> list[dict]:
-    """Collect from a Playwright-based platform (tieba/zhihu/xhs/douyin)."""
-    if platform == "tieba":
-        from collectors.spiders.tieba_spider import TiebaSpider as SpiderClass
-    elif platform == "zhihu":
-        from collectors.spiders.zhihu_spider import ZhihuSearchSpider as SpiderClass
-    elif platform == "xiaohongshu":
+def collect_tieba(keyword: str, max_pages: int) -> list:
+    """Collect from Tieba (JSON API, no browser). Returns ParsedTiebaItem objects. 🆕"""
+    from collectors.spiders.tieba_api_spider import TiebaAPISpider
+
+    spider = TiebaAPISpider()
+    all_items = []
+    try:
+        logger.info("[tieba] Searching: {} (max_pages={})", keyword, max_pages)
+        items = spider.search(keyword, max_pages=max_pages, rn=20)
+        all_items = items  # Keep as ParsedTiebaItem objects
+        logger.info("[tieba] {} items collected", len(all_items))
+    finally:
+        spider.close()
+    return all_items
+
+
+def collect_zhihu_http(keyword: str, max_pages: int) -> list:
+    """Collect from Zhihu (pure HTTP API, no browser). Returns ParsedZhihuAPIItem objects. 🆕"""
+    from collectors.spiders.zhihu_api_spider import ZhihuAPISpider
+
+    spider = ZhihuAPISpider()
+    all_items = []
+    try:
+        logger.info("[zhihu] Searching: {} (max_pages={})", keyword, max_pages)
+        items = spider.search(keyword, max_pages=max_pages)
+        all_items = items  # Keep as ParsedZhihuAPIItem objects
+        logger.info("[zhihu] {} items collected", len(all_items))
+    finally:
+        if hasattr(spider, '_session') and spider._session:
+            spider._session.close()
+    return all_items
+
+
+def collect_playwright(platform: str, keyword: str, max_pages: int) -> list:
+    """Collect from a Playwright-based platform (xhs/douyin). Returns raw parsed objects."""
+    if platform == "xiaohongshu":
         from collectors.spiders.xiaohongshu_spider import XiaohongshuSearchSpider as SpiderClass
     elif platform == "douyin":
         from collectors.spiders.douyin_spider import DouyinSearchSpider as SpiderClass
@@ -131,20 +162,8 @@ def collect_playwright(platform: str, keyword: str, max_pages: int) -> list[dict
     try:
         spider.start()
         logger.info("[{}] Searching: {} (max_pages={})", platform, keyword, max_pages)
-
-        if platform == "zhihu":
-            items = spider.search_and_parse(
-                keyword, max_pages=max_pages,
-                fetch_answers=True, fetch_comments=True)
-        elif platform == "tieba":
-            items = spider.search_and_parse(
-                keyword, max_pages=max_pages,
-                fetch_replies=True)
-        else:
-            items = spider.search_and_parse(keyword, max_pages=max_pages)
-
-        for item in items:
-            all_items.append(_serialize(item))
+        items = spider.search_and_parse(keyword, max_pages=max_pages)
+        all_items = items  # Keep as raw parsed objects
         logger.info("[{}] {} items collected", platform, len(all_items))
     except Exception as exc:
         logger.error("[{}] Collection failed: {}", platform, exc)
@@ -197,7 +216,7 @@ def main():
             logger.warning("[{}] No config — skipping", platform)
             continue
 
-        # Check cookies (except weibo which is HTTP-based)
+        # Check cookies for playwright-based platforms
         if config["spider"] == "playwright":
             from collectors.spiders.base_spider import BaseSpider
             cookies = BaseSpider.load_cookies(platform)
@@ -208,13 +227,23 @@ def main():
         # Collect with all keywords
         all_items = []
         for kw in kw_list:
-            if config["spider"] == "http":
+            if platform == "weibo":
+                items = collect_weibo(kw, args.max_pages)
+            elif platform == "tieba":
+                items = collect_tieba(kw, args.max_pages)
+            elif platform == "zhihu":
+                items = collect_zhihu_http(kw, args.max_pages)
+            elif config["spider"] == "http":
                 items = collect_weibo(kw, args.max_pages)
             else:
                 items = collect_playwright(platform, kw, args.max_pages)
             all_items.extend(items)
             if items:
-                time.sleep(2)  # Be polite between keywords
+                time.sleep(1)  # Be polite between keywords
+
+        # 🆕 归一化为统一 IntelItem 格式
+        normalized = normalize_items(platform, all_items)
+        logger.info("[{}] Normalized {} items to unified IntelItem format", platform, len(normalized))
 
         # Save to file
         out_path = out_dir / f"{platform}_sample.json"
@@ -222,15 +251,15 @@ def main():
             json.dump(
                 {
                     "platform": platform,
-                    "collected_at": datetime.utcnow().isoformat(),
+                    "collected_at": datetime.now(timezone.utc).isoformat(),
                     "keywords": kw_list,
-                    "total": len(all_items),
-                    "items": all_items,
+                    "total": len(normalized),
+                    "items": [_serialize(item) for item in normalized],
                 },
                 f, ensure_ascii=False, indent=2, default=str,
             )
-        logger.info("[{}] Saved {} items → {}", platform, len(all_items), out_path.name)
-        summary[platform] = {"items": len(all_items), "file": out_path.name}
+        logger.info("[{}] Saved {} items → {}", platform, len(normalized), out_path.name)
+        summary[platform] = {"items": len(normalized), "file": out_path.name}
 
     elapsed = time.time() - t_start
     logger.info("=" * 60)

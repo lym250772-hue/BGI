@@ -38,14 +38,42 @@ class IntelItem:
 
     # ── 消息标识 ──
     message_id: Optional[int] = None    # 平台消息/帖子 ID
+    post_id: str = ""                   # 🆕 统一帖子ID（映射 weibo_id/thread_id/note_id/aweme_id）
+
+    # ── 互动指标（统一，各平台映射） ──
+    like_count: int = 0     # 点赞数
+    comment_count: int = 0  # 评论/回复数
+    share_count: int = 0    # 转发/分享数
+    collect_count: int = 0  # 收藏数（小红书等）
+
+    # ── 统一互动内容 🆕 ──
+    comments: list[dict] = field(default_factory=list)
+    """统一评论/回复/答案格式:
+    {
+        "id": str,              # 评论ID
+        "author_uid": str,      # 作者ID
+        "author_username": str, # 作者昵称
+        "content": str,         # 评论内容
+        "like_count": int,      # 评论点赞数
+        "reply_to": str,        # 回复对象（用户名或评论ID）
+        "created_at": str,      # ISO时间
+        "type": str,            # "comment" | "reply" | "answer"
+    }
+    小红书/抖音: 暂无评论采集，字段预留供后续接入
+    """
+
+    # ── 标签 🆕 ──
+    tags: list[str] = field(default_factory=list)
+    """统一标签/话题/hashtag（各平台映射）"""
 
     # ── 扩展 ──
     metadata: dict = field(default_factory=dict)
     """平台特定元数据，如:
-    weibo:  {keyword, weibo_id, has_image, has_video, is_long_text}
-    tieba:  {keyword, bar_name, thread_id, reply_count, has_image, has_emoji, replies}
-    zhihu:  {keyword, question_id, answer_id, voteup_count, topics, answers}
-    telegram: {group_id, message_id, has_image, has_video, is_long_text}
+    weibo:  {weibo_id, has_video, is_long_text}
+    tieba:  {thread_id, bar_name, has_emoji, forum_id}
+    zhihu:  {question_id, answer_id, voteup_count}
+    douyin: {aweme_id, hashtags, play_count, duration}
+    xiaohongshu: {note_id, tags_original}
     """
 
     # ── 媒体 ──
