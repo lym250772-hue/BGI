@@ -1,84 +1,92 @@
 """
-抖音关键词搜索 Spider（Playwright + API 拦截 + DOM 兜底）
+抖音关键词搜索 Spider — X-Bogus 签名 + 纯 HTTP API + DOM 兜底
 
 核心策略:
-  1. 优先拦截 XHR 搜索 API 获取结构化 JSON（/aweme/v1/web/search/item/）
-  2. 兜底 DOM 解析搜索结果卡片
-  3. Playwright stealth + Cookie 注入
+  1. Playwright 提取 msToken + webid + Cookie
+  2. execjs 调用 dy.js 生成 X-Bogus 签名
+  3. 纯 HTTP requests 调用搜索 API (aweme/v1/web/general/search/single/)
+  4. 兜底: Playwright 首页搜索框
 
 反爬要点:
-  - Cookie 注入（s_v_web_id / passport_csrf_token / tt_webid 等）
-  - 首页预热 + 搜索入口渐进式访问
+  - Playwright 提取 msToken/webid（浏览器自动刷新）
+  - X-Bogus 签名（douyin 内部 JS 算法）
+  - 完整浏览器参数模拟（device_platform/aid/channel 等）
   - 随机 UA + viewport
-  - 较长请求间隔（抖音反爬极强）
 
-抖音搜索机制:
-  - Web 搜索页: https://www.douyin.com/search/{keyword}
-  - 搜索 API: GET /aweme/v1/web/search/item/?keyword=...&search_id=...
-  - 新版 Web API: /aweme/v1/web/general/search/single/?
-  - 需要 msToken / X-Bogus / _signature 等签名参数
-  - 浏览器内自动携带签名，无需逆向
-
-灰黑产数据采集关注点:
-  - 视频描述中的引流话术（加微信/QQ、免费领取、兼职等）
-  - 评论区违规内容（需单独采集）
-  - 账号主页信息（简介含联系方式）
-  - 话题标签（#刷单 #兼职 #日赚 等）
+参考:
+  - JargeWu/DouYin_Spider (GitHub)
+  - CSDN: Selenium 抖音评论采集
 """
 
 import time
 import json
 import re
 import random
+import execjs
+import requests
+from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass, field
 from urllib.parse import quote
 from loguru import logger
 from playwright.sync_api import sync_playwright
 
-from collectors.spiders.base_spider import BaseSpider, random_ua
+from collectors.spiders.base_spider import BaseSpider
+
+
+# ── X-Bogus 生成器（全局单例） ────────────────────────────────────────────────
+
+_xbogus_js = None
+
+def _get_xbogus_js():
+    global _xbogus_js
+    if _xbogus_js is None:
+        js_path = Path(__file__).parent / "douyin_xbogus.js"
+        with open(js_path, "r", encoding="gb18030") as f:
+            _xbogus_js = execjs.compile(f.read())
+    return _xbogus_js
+
+def generate_xbogus(query_string: str) -> str:
+    """生成抖音 X-Bogus 签名参数。"""
+    return _get_xbogus_js().call("get_dy_xb", query_string)
 
 
 # ── 解析结果结构 ──────────────────────────────────────────────────────────────
 
 @dataclass
 class ParsedDouyinItem:
-    """抖音搜索结果条目（视频/Aweme）。"""
     platform: str = "douyin"
     content_raw: str = ""
     content_type: str = "video"
     source_url: str = ""
     author_uid: str = ""
     author_username: str = ""
-    aweme_id: str = ""            # 视频 ID
+    aweme_id: str = ""
     collected_at: datetime = field(default_factory=datetime.utcnow)
     keyword: str = ""
     like_count: int = 0
     comment_count: int = 0
     share_count: int = 0
     play_count: int = 0
-    duration: int = 0             # 视频时长（秒）
+    duration: int = 0
     hashtags: list[str] = field(default_factory=list)
     video_cover_url: str = ""
-    image_list: list[str] = field(default_factory=list)  # 图集图片 URL
+    image_list: list[str] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
 
 # ── Spider ─────────────────────────────────────────────────────────────────────
 
 class DouyinSearchSpider(BaseSpider):
-    """抖音搜索 Spider — API 拦截 + DOM 兜底。"""
+    """抖音搜索 Spider — X-Bogus 签名 + 纯 HTTP API。"""
 
     PLATFORM = "douyin"
     HOME_URL = "https://www.douyin.com"
     SEARCH_URL = "https://www.douyin.com/search"
-    BROWSER_CHANNEL = "msedge"  # 用系统 Edge 绕过验证码
-    # 搜索 API (新版 2024+)
-    SEARCH_API = "/aweme/v1/web/search/item/"
-    GENERAL_SEARCH_API = "/aweme/v1/web/general/search/single/"
+    SEARCH_API = "https://www.douyin.com/aweme/v1/web/general/search/single/"
     PAGE_SIZE = 15
-    MIN_DELAY = 3.0
-    MAX_DELAY = 6.0
+    MIN_DELAY = 2.0
+    MAX_DELAY = 4.0
     MAX_RETRIES = 3
     BACKOFF_THRESHOLD = 4
 
@@ -86,14 +94,15 @@ class DouyinSearchSpider(BaseSpider):
         super().__init__(headless)
         self._api_responses: list[dict] = []
         self._api_capture_enabled = False
-        self._search_id = ""  # 抖音搜索 ID（翻页需要）
+        self._msToken = ""
+        self._webid = ""
 
     # ═══════════════════════════════════════════════════════════════════════════
     # 反检测启动（覆盖 BaseSpider.start）
     # ═══════════════════════════════════════════════════════════════════════════
 
     def start(self):
-        """启动浏览器 — 抖音专用反检测：incognito + 隐藏 webdriver + 随机 UA。"""
+        """启动浏览器 — 提取 msToken + webid，建立登录会话。"""
         self._playwright = sync_playwright().start()
         launch_kwargs = {
             "headless": self.headless,
@@ -101,48 +110,80 @@ class DouyinSearchSpider(BaseSpider):
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--incognito",
             ],
         }
-        if self.BROWSER_CHANNEL:
+        if hasattr(self, 'BROWSER_CHANNEL') and self.BROWSER_CHANNEL:
             launch_kwargs["channel"] = self.BROWSER_CHANNEL
         self._browser = self._playwright.chromium.launch(**launch_kwargs)
 
-        # 随机 UA（Mac/Windows 交替降低指纹一致性）
         ua = random.choice([
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
         ])
         self._context = self._browser.new_context(
             user_agent=ua,
             locale="zh-CN",
             viewport={"width": 1440, "height": 900},
         )
-
-        # 隐藏 webdriver 标记
         self._page = self._context.new_page()
         self._page.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => false});"
         )
-
-        # 注入 Cookie
         self._inject_cookies()
+        self._setup_request_interception()
 
-        # 预热：访问首页
-        try:
-            self._page.goto(self.HOME_URL, wait_until="domcontentloaded", timeout=15000)
-            time.sleep(2)
-        except Exception:
-            logger.warning("预热超时，将在搜索时重试")
+        # 🆕 提取 msToken 和 webid
+        self._extract_tokens()
 
-        # 加载增量 + 断点状态
         self._load_incremental_state()
         self._load_checkpoint()
+        logger.info(f"{self.PLATFORM} Spider 已启动（登录态={'是' if self._logged_in else '否'}）")
 
-        logger.info(
-            f"{self.PLATFORM} Spider 已启动"
-            f"（登录态={'是' if self._logged_in else '否'}）"
-        )
+    def _extract_tokens(self):
+        """从浏览器 Cookie 和页面请求中提取 msToken 和 webid。"""
+        # 拦截 API 请求提取 webid
+        captured_webid = []
+
+        def on_request(request):
+            url = request.url
+            if 'webid=' in url and 'douyin.com' in url:
+                import re as _re
+                m = _re.search(r'webid=(\d+)', url)
+                if m:
+                    captured_webid.append(m.group(1))
+
+        self._page.on('request', on_request)
+
+        # 导航到用户主页（触发 API 请求以提取 webid）
+        try:
+            self._page.goto(
+                'https://www.douyin.com/user/MS4wLjABAAAAEpmH344CkCw2M58T33Q8TuFpdvJsOyaZcbWxAMc6H03wOVFf1Ow4mPP94TDUS4Us',
+                wait_until='domcontentloaded', timeout=15000,
+            )
+            time.sleep(3)
+        except Exception:
+            logger.warning("token 提取页面加载超时")
+
+        # 从 Cookie 提取 msToken
+        page_cookies = self._context.cookies()
+        for c in page_cookies:
+            if c['name'] == 'msToken':
+                self._msToken = c['value']
+                logger.info(f"已提取 msToken: {self._msToken[:20]}...")
+
+        if captured_webid:
+            self._webid = captured_webid[0]
+            logger.info(f"已提取 webid: {self._webid}")
+
+        # 如果 msToken 没从 cookie 拿到，尝试从 localStorage
+        if not self._msToken:
+            try:
+                ms = self._page.evaluate("() => localStorage.getItem('mxmsToken') || ''")
+                if ms:
+                    self._msToken = ms
+                    logger.info(f"从 localStorage 提取 msToken")
+            except Exception:
+                pass
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Cookie 注入
@@ -241,25 +282,11 @@ class DouyinSearchSpider(BaseSpider):
         checkpoint_cb = kwargs.get("checkpoint_callback")
         all_items = []
         consecutive_empty = 0
-        self._search_id = ""  # 重置 search_id（每个关键词独立）
 
-        # 🆕 优先使用 API 直调（page.evaluate fetch），失败后回退首页搜索框
         for page_num in range(start_page, max_pages + 1):
             logger.info(f"搜索 [{keyword}] 第{page_num}/{max_pages}页")
-
             try:
-                # 方式1: API 直调（快速、可靠）
                 items = self._call_search_api(keyword, page_num)
-                if items:
-                    logger.debug(f"  API 直调获取 {len(items)} 条")
-                else:
-                    # 方式2: 回退到首页搜索框 + body 正则（仅第1页）
-                    if page_num == 1:
-                        logger.debug("  API 无数据，回退首页搜索框方案")
-                        items = self._search_via_homepage(keyword)
-                    else:
-                        logger.debug("  API 无数据且非首页，跳过")
-                        break
 
                 new_count = 0
                 for item in items:
@@ -281,7 +308,6 @@ class DouyinSearchSpider(BaseSpider):
                     consecutive_empty = 0
 
                 if max_items and len(all_items) >= max_items:
-                    logger.info(f"  已达到 max_items={max_items}")
                     break
 
             except Exception as exc:
@@ -546,74 +572,108 @@ class DouyinSearchSpider(BaseSpider):
     # ═══════════════════════════════════════════════════════════════════════════
 
     def _call_search_api(self, keyword: str, page: int = 1) -> list[ParsedDouyinItem]:
-        """在浏览器内通过 page.evaluate(fetch) 调用抖音搜索 API。"""
-        from urllib.parse import quote
+        """🆕 纯 HTTP 搜索 API（X-Bogus 签名，无需 Playwright fetch）。"""
+        offset = (page - 1) * 10
         encoded = quote(keyword)
-        offset = (page - 1) * self.PAGE_SIZE
 
-        # 首次获取 search_id（使用绝对 URL，兼容从 creator.douyin.com 发起）
-        if not self._search_id:
-            js_get_sid = (
-                "async () => {"
-                "  try {"
-                f"    const resp = await fetch('https://www.douyin.com/aweme/v1/web/general/search/single/?"
-                f"keyword={encoded}&offset=0&count=1&search_source=normal_search',"
-                "      { method: 'GET', credentials: 'include',"
-                "        headers: { 'Accept': 'application/json' } });"
-                "    const json = await resp.json();"
-                "    return json?.data?.search_id || json?.log_pb?.impr_id || '';"
-                "  } catch(e) { return ''; }"
-                "}"
-            )
-            try:
-                sid = self._page.evaluate(js_get_sid)
-                if sid:
-                    self._search_id = str(sid)
-                    logger.debug(f"  获取 search_id: {self._search_id}")
-            except Exception:
-                pass
-            time.sleep(1.0 + random.random())
+        # 构建请求参数（对齐 douyin 浏览器请求）
+        params = [
+            ("device_platform", "webapp"),
+            ("aid", "6383"),
+            ("channel", "channel_pc_web"),
+            ("search_channel", "aweme_general"),
+            ("sort_type", "0"),
+            ("publish_time", "0"),
+            ("keyword", keyword),
+            ("search_source", "normal_search"),
+            ("query_correct_type", "1"),
+            ("is_filter_search", "0"),
+            ("from_group_id", ""),
+            ("offset", str(offset)),
+            ("count", "15"),
+            ("pc_client_type", "1"),
+            ("version_code", "190600"),
+            ("version_name", "19.6.0"),
+            ("cookie_enabled", "true"),
+            ("screen_width", "1920"),
+            ("screen_height", "1080"),
+            ("browser_language", "zh-CN"),
+            ("browser_platform", "Win32"),
+            ("browser_name", "Edge"),
+            ("browser_version", "120.0.0.0"),
+            ("browser_online", "true"),
+            ("engine_name", "Blink"),
+            ("engine_version", "120.0.0.0"),
+            ("os_name", "Windows"),
+            ("os_version", "10"),
+            ("cpu_core_num", "16"),
+            ("device_memory", "8"),
+            ("platform", "PC"),
+            ("downlink", "10"),
+            ("effective_type", "4g"),
+            ("round_trip_time", "50"),
+        ]
 
-        # 正式搜索 — 使用绝对 URL（兼容从 creator.douyin.com 发起）
-        search_id_param = f"&search_id={self._search_id}" if self._search_id else ""
-        js_code = (
-            "async () => {"
-            "  try {"
-            f"    const url = 'https://www.douyin.com/aweme/v1/web/search/item/?keyword={encoded}"
-            f"&offset={offset}&count={self.PAGE_SIZE}&search_source=normal_search{search_id_param}';"
-            "    const resp = await fetch(url,"
-            "      { method: 'GET', credentials: 'include',"
-            "        headers: { 'Accept': 'application/json', 'Referer': 'https://www.douyin.com/' } });"
-            "    if (!resp.ok) return { error: true, status: resp.status };"
-            "    const json = await resp.json();"
-            "    return json;"
-            "  } catch(e) { return { error: true, message: e.message }; }"
-            "}"
-        )
-        result = self._page.evaluate(js_code)
-        self.stats["pages_loaded"] += 1
-        time.sleep(1.5 + random.random() * 2.0)  # API 频率控制
+        # 添加 msToken 和 webid
+        if self._msToken:
+            params.append(("msToken", self._msToken))
+        if self._webid:
+            params.append(("webid", self._webid))
 
-        if not result or result.get("error"):
-            status = result.get("status", "?") if result else "null"
-            msg = result.get("message", "") if result else ""
-            logger.warning(f"  搜索 API 异常 (status={status}, msg={msg})")
+        # 生成 query string + X-Bogus
+        query_string = "&".join(f"{k}={v}" for k, v in params)
+        try:
+            xbogus = generate_xbogus(query_string)
+            query_string += f"&X-Bogus={xbogus}"
+        except Exception as e:
+            logger.warning(f"X-Bogus 生成失败: {e}，尝试无签名请求")
+            # 兜底：返回空让 search_and_parse 回退到首页方案
             return []
 
-        # 解析响应（数据在 aweme_list 字段，新版 API 不再用 data 包装）
-        # 兼容多种响应格式: aweme_list / data / data.data
-        aweme_list = (result.get("aweme_list") or result.get("data") or [])
-        if isinstance(aweme_list, dict):
-            aweme_list = aweme_list.get("data") or aweme_list.get("aweme_list") or []
-        if not isinstance(aweme_list, list):
-            aweme_list = []
+        url = f"{self.SEARCH_API}?{query_string}"
+
+        # 从 Playwright 获取最新 Cookie
+        page_cookies = self._context.cookies()
+        cookies_dict = {c['name']: c['value'] for c in page_cookies}
+
+        headers = {
+            "authority": "www.douyin.com",
+            "accept": "application/json, text/plain, */*",
+            "accept-language": "zh-CN,zh;q=0.9",
+            "referer": "https://www.douyin.com/",
+            "sec-ch-ua": '"Microsoft Edge";v="120", "Not;A=Brand";v="8", "Chromium";v="120"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+        }
+
+        try:
+            resp = requests.get(url, headers=headers, cookies=cookies_dict, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning(f"搜索 API 请求失败: {e}")
+            return []
+
+        self.stats["pages_loaded"] += 1
+        time.sleep(random.uniform(self.MIN_DELAY, self.MAX_DELAY))
+
+        # 解析响应
+        items_data = data.get("data", [])
+        if not isinstance(items_data, list):
+            items_data = []
 
         items = []
-        for raw in aweme_list:
-            aweme = raw.get("aweme_info", raw)
-            item = self._parse_aweme(aweme, keyword)
-            if item:
-                items.append(item)
+        for item_data in items_data:
+            if item_data.get("type") != 1:  # type=1 是视频
+                continue
+            aweme = item_data.get("aweme_info", item_data)
+            parsed = self._parse_aweme(aweme, keyword)
+            if parsed:
+                items.append(parsed)
 
         return items
 
