@@ -140,7 +140,7 @@ def fetch_xiaohongshu_comments(page, note_id: str, xsec_token: str = "",
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def fetch_tieba_replies(page, thread_id: str, max_pages: int = 3) -> list[dict]:
-    """打开贴吧帖子页，从 DOM 提取回复（使用已验证的旧版 Spider 选择器）。"""
+    """打开贴吧帖子页，从新版 DOM (pb-comment-item) 提取回复。"""
     replies = []
 
     for pn in range(1, max_pages + 1):
@@ -151,41 +151,46 @@ def fetch_tieba_replies(page, thread_id: str, max_pages: int = 3) -> list[dict]:
 
             page.goto(url, wait_until="domcontentloaded", timeout=20000,
                       referer="https://tieba.baidu.com/index.html")
+            time.sleep(4)
 
-            # 等待帖子内容渲染
-            try:
-                page.wait_for_selector("div.l_post, div.d_post_content", timeout=10000)
-            except Exception:
-                pass
-            time.sleep(2)
+            # 滚动触发热加载
+            for _ in range(3):
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(1.5)
 
-            # 使用已验证的 DOM 提取逻辑（来自 tieba_spider.py）
+            # 提取回复（新版 .pb-comment-item）
             raw = page.evaluate("""
             () => {
                 var results = [];
-                var posts = document.querySelectorAll('div.l_post');
-                // 跳过第1个（主帖）
-                for (var i = 1; i < posts.length; i++) {
-                    var post = posts[i];
-                    var content = '';
-                    var contentEl = post.querySelector('.d_post_content, [class*=\"post_content\"]');
-                    if (contentEl) content = contentEl.innerText.trim();
-                    if (!content) continue;
-
+                var items = document.querySelectorAll('.pb-comment-item');
+                items.forEach(function(item) {
+                    // 提取作者 — 取 head-line 中第一个 a 标签的文本
                     var author = '';
-                    var authorEl = post.querySelector('.d_author a, [class*=\"author\"]');
-                    if (authorEl) author = authorEl.innerText.trim();
+                    var headLine = item.querySelector('[class*=head-line], [class*=user-info]');
+                    if (headLine) {
+                        var firstLink = headLine.querySelector('a');
+                        if (firstLink) author = firstLink.innerText.trim();
+                    }
+                    // 兜底：从 data-id 周围的文本提取
+                    if (!author) {
+                        var allText = item.innerText.split('\\n');
+                        if (allText.length > 0) author = allText[0].trim();
+                    }
 
-                    var floor = '';
-                    var floorEl = post.querySelector('.tail-info');
-                    if (floorEl) floor = floorEl.innerText.replace('楼', '').trim();
+                    // 提取内容 — 移除头部用户信息和底部操作栏后取文本
+                    var clone = item.cloneNode(true);
+                    var toRemove = clone.querySelectorAll('[class*=head-line], [class*=user-info], [class*=comment-actions], [class*=action-bar], [class*=tail-info]');
+                    toRemove.forEach(function(el) { el.remove(); });
+                    var content = clone.innerText.trim();
+                    content = content.replace(/\\n{3,}/g, '\\n\\n').trim();
 
-                    results.push({
-                        author_username: author,
-                        content: content.substring(0, 500),
-                        floor: parseInt(floor) || 0,
-                    });
-                }
+                    if (content.length > 2) {
+                        results.push({
+                            author_username: author,
+                            content: content.substring(0, 500),
+                        });
+                    }
+                });
                 return results;
             }
             """)
@@ -197,10 +202,10 @@ def fetch_tieba_replies(page, thread_id: str, max_pages: int = 3) -> list[dict]:
                     comment_type="reply",
                 ))
 
-            if len(raw) < 20:
+            if len(raw) < 10:
                 break
 
-            time.sleep(random.uniform(1.0, 2.0))
+            time.sleep(random.uniform(1.5, 3.0))
         except Exception as e:
             logger.debug(f"  贴吧回复第{pn}页失败: {e}")
             break
