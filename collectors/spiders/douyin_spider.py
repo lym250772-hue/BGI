@@ -175,7 +175,22 @@ class DouyinSearchSpider(BaseSpider):
             self._webid = captured_webid[0]
             logger.info(f"已提取 webid: {self._webid}")
 
-        # 如果 msToken 没从 cookie 拿到，尝试从 localStorage
+        # 如果浏览器没拿到，尝试从保存的 tokens 文件加载
+        if not self._msToken:
+            token_file = Path("data/raw/douyin_tokens.json")
+            if token_file.exists():
+                try:
+                    with open(token_file, encoding="utf-8") as f:
+                        saved = json.load(f)
+                    if saved.get("msToken"):
+                        self._msToken = saved["msToken"]
+                        logger.info(f"从 douyin_tokens.json 加载 msToken")
+                    if not self._webid and saved.get("webid"):
+                        self._webid = saved["webid"]
+                except Exception:
+                    pass
+
+        # 如果还没有，尝试 localStorage
         if not self._msToken:
             try:
                 ms = self._page.evaluate("() => localStorage.getItem('mxmsToken') || ''")
@@ -184,6 +199,13 @@ class DouyinSearchSpider(BaseSpider):
                     logger.info(f"从 localStorage 提取 msToken")
             except Exception:
                 pass
+
+        # 如果仍然没有，记录警告
+        if not self._msToken:
+            logger.warning(
+                "未获取到 msToken，搜索 API 可能被反垃圾拦截。"
+                "请运行: python scripts/crawl/douyin_get_tokens.py"
+            )
 
     # ═══════════════════════════════════════════════════════════════════════════
     # Cookie 注入
