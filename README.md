@@ -1,22 +1,24 @@
 # BGI 智能黑灰产情报研判 Agent
 
-BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析系统。它从队友交付的结构化 JSONL 情报开始，完成清洗去重、风险意图分类、实体抽取、黑话归一、新黑话候选发现、证据片段提取、风险评分、关系扩线、结构化入库和轻量 ChatBI 态势问答。
+BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析系统。它从多源采集开始，完成数据接入 → 清洗去重 → 风险意图分类 → 实体抽取 → 黑话归一 → 新黑话候选发现 → 证据片段提取 → 风险评分 → 关系扩线 → 结构化入库 → 轻量 ChatBI 态势问答。
 
 当前版本的核心定位很明确：**把散落的黑灰产文本情报，自动变成可查询、可扩线、可复核的结构化线索库**。
 
 ## 1. 项目边界
 
-本项目当前主要负责“数据结构化之后”的分析与研判链路。
+本项目覆盖采集 → 分析 → 展示的完整链路。
 
-- 队友侧：负责爬取 IM、群组、论坛、贴吧、微博、知乎等来源，并尽量输出统一 JSONL。
-- BGI 侧：接收结构化 JSONL，写入 MySQL 原始情报表，然后执行清洗、分类、实体抽取、黑话研判、图谱扩线、Doris 聚合和前端展示。
-- OCR/ASR：代码结构允许接入，但当前主链路以文本情报为主，图片和语音解析依赖上游采集侧是否交付结果。
+- 采集层：5 渠道已打通（微博/知乎/小红书/抖音/贴吧），纯 HTTP + Playwright 双模式，产出统一 IntelItem 格式。支持评论采集和图片/封面 URL 提取。**贴吧已从 Playwright 0.03条/秒提速至 HTTP JSON API ~10条/秒（300x）。**
+- 分析层：接收结构化数据，写入 MySQL，执行清洗、分类、实体抽取、黑话研判、图谱扩线、Doris 聚合和前端展示。
+- OCR/ASR：代码结构允许接入，图文 OCR 管道已实现（PaddleOCR）。
 - Java/Spring Boot：当前项目没有 Java 后端，控制面由 Python + FastAPI + Streamlit 承担。
 
 ## 2. 当前能力总览
 
 | 模块 | 当前状态 | 说明 |
 |---|---:|---|
+| **数据采集** | **已实现** | **5/6 渠道打通（微博/知乎/小红书/抖音/贴吧），纯HTTP+Playwright双模式，~8条/秒(微博)，含评论/图片采集** |
+| 示例数据 | 已提供 | `examples/` 含 5 平台 1,076 条真实黑灰产样本（含评论/答案/图片） |
 | 结构化数据接入 | 已实现 | `scripts/importers/import_partner_jsonl.py` 支持队友 JSONL 导入、字段校验、去重入库 |
 | 清洗去重 | 已实现 | HTML 剥离、空白规范化、SimHash 去重、噪声过滤、高危关键词标记 |
 | 风险分类 | 已实现 | L1 规则优先，L2 RoBERTa 接口预留，L3 LLM 兜底，支持降级 |
@@ -36,7 +38,7 @@ BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析�
 
 ```mermaid
 flowchart LR
-    A["队友 JSONL 数据"] --> B["导入适配器\nimport_partner_jsonl.py"]
+    A["多源采集\n5平台/1,076条样本"] --> B["数据接入\nimport_partner_jsonl.py\n或 main.py collect"]
     B --> C["MySQL ODS\nods_raw_intel"]
     C --> D["清洗去重\ncleaner.pipeline"]
     D --> E["Agent 状态机\nanalyzer.state_machine"]
@@ -585,7 +587,7 @@ BGI/
 ├── analyzer/                # 分类、实体抽取、证据、评分、状态机、异步 worker
 ├── api/                     # FastAPI 接口
 ├── cleaner/                 # 文本清洗、SimHash 去重
-├── collectors/              # 早期采集实验代码；当前主流程不依赖
+├── collectors/              # 多源数据采集层（5平台已打通，6 Spider + 5 Collector）
 ├── config/                  # 配置与风险规则
 ├── data/                    # 模型、词典、样例数据
 ├── docker/                  # MySQL、Neo4j、Milvus、MinIO、Doris 编排
