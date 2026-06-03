@@ -2,96 +2,59 @@
 
 本目录存放从各平台采集到的真实黑灰产相关样本数据，用于分析引擎开发、测试和演示。
 
-## 采集概况
+## 采集概况（2026-06-03 最终版）
 
-| 文件 | 平台 | 条数 | 关键词 | 采集技术 | 数据特点 |
-|------|------|:--:|------|------|------|
-| `weibo_sample.json` | 微博 | 173 | 刷单/接码/账号出售 | AJAX API | 含评论、转发/点赞数 |
-| `zhihu_sample.json` | 知乎 | 169 | 刷单/接码/账号出售 | 纯HTTP API | 含答案+评论、话题标签 |
-| `tieba_sample.json` | 贴吧 | **171** 🚀 | 刷单/接码/账号出售 | **JSON API (~10条/秒)** | 含图片、吧名、回复数 |
-| `xiaohongshu_sample.json` | 小红书 | **188** 🆕 | 刷单/接码/账号出售 | **SSR提取 (window.__INITIAL_STATE__)** | 含图片、互动数据 |
-| `douyin_sample.json` | 抖音 | **73** 🆕 | 刷单/无人直播/账号出售 | **可见浏览器+fetch API (X-Bogus)** | 含点赞/评论数、作者、视频封面 |
-| `telegram_sample.json` | Telegram | — | — | Telethon（需 API ID/Hash） | 待配置 |
+| 文件 | 平台 | 条数 | 关键词 | 采集技术 | 评论 |
+|------|------|:--:|------|------|:--:|
+| `weibo_sample.json` | 微博 | **1,768** | 48黑话词 | AJAX API | ✅ |
+| `zhihu_sample.json` | 知乎 | **1,607** | 48黑话词 | HTTP API | ✅ |
+| `xiaohongshu_sample.json` | 小红书 | **2,556** | 48黑话词 | SSR提取 + 可见浏览器 | ✅ |
+| `douyin_sample.json` | 抖音 | **1,167** | 48黑话词 | 可见浏览器+X-Bogus API | ✅ |
+| `tieba_sample.json` | 贴吧 | **1,141** | 48黑话词 | JSON API (~10条/秒) | 🔲 |
+| `telegram_sample.json` | Telegram | — | — | Telethon（需 API ID/Hash） | — |
 
-> **合计**: 774 条 / ~1.6MB / 5 平台（2026-06-03 最终版，统一格式）
-> 🎉 全部5平台采集打通！抖音使用可见浏览器+fetch API(X-Bogus签名)
+> **合计**: **8,239 条** / ~21MB / 5 平台 / 48 黑话关键词全覆盖
 
-## 🆕 贴吧 API 突破
-
-贴吧已从 Playwright DOM 解析（0.03条/秒）升级为纯 HTTP JSON API（~10条/秒），
-本次采集 166 条仅用 ~15 秒（旧方案需 ~90 分钟）。
-新 Spider: `collectors/spiders/tieba_api_spider.py`
-测试脚本: `python scripts/crawl/test_tieba_api.py`
+### 48个黑话关键词
+```
+714高炮, AB贷, 上车, 下车, 云手机, 人脸, 代下, 代理IP, 众包, 八件套,
+养号, 出号, 刷单, 千粉, 卡商, 反卤, 发卡, 可开播, 号商, 四件套,
+大肉, 引流, 打码, 报单, 挂机, 接码, 搬砖, 撞库, 数字人, 料商,
+无人直播, 无损套, 日结, 模拟器, 水房, 洗号, 狗推, 猫池, 白户,
+破盾, 羊头, 羊腿, 群控, 薅羊毛, 融车, 跑分, 车手, 黄牛
+```
 
 ## 数据格式
 
-**所有平台统一使用 `IntelItem` 格式**（`collectors/base.py` + `collectors/normalizer.py`）。
-
-### 统一字段结构
+所有平台统一使用 IntelItem 格式，含 `comments` 评论数组。详见 `collectors/base.py` 和 `collectors/normalizer.py`。
 
 ```json
 {
-  "platform": "weibo",
-  "post_id": "5305700962275305",
-  "content_raw": "原始正文内容...",
-  "content_type": "text",
-  "source_url": "https://weibo.com/...",
-  "author_uid": "作者UID",
-  "author_username": "作者昵称",
-  "collected_at": "2026-06-03T04:34:xx",
-  "like_count": 0,
-  "comment_count": 0,
-  "share_count": 0,
-  "collect_count": 0,
-  "comments": [
-    {
-      "id": "评论ID",
-      "author_uid": "",
-      "author_username": "评论者",
-      "content": "评论内容",
-      "like_count": 0,
-      "reply_to": "",
-      "created_at": "",
-      "type": "comment"
-    }
-  ],
-  "tags": ["标签1", "标签2"],
-  "image_urls": ["https://img1.jpg"],
-  "video_cover_url": "",
-  "metadata": { /* 平台特定字段 */ }
+  "platform": "xiaohongshu",
+  "post_id": "67b7216c0000000009014ba3",
+  "content_raw": "【标题】香港拆单任务真相曝光...",
+  "source_url": "https://www.xiaohongshu.com/explore/...?xsec_token=...",
+  "author_username": "香港警察",
+  "like_count": 121, "comment_count": 112,
+  "comments": [{"id":"...", "author_username":"...", "content":"...", "type":"comment"}],
+  "tags": ["刷单"], "image_urls": ["https://..."],
+  "metadata": {"note_id": "...", "xsec_token": "...", "has_image": true}
 }
 ```
 
-### 各平台映射
-
-| 统一字段 | 微博 | 知乎 | 贴吧 | 小红书 | 抖音 |
-|------|------|------|------|------|------|
-| `post_id` | weibo_id | answer_id | thread_id | note_id | aweme_id |
-| `like_count` | attitudes_count | voteup_count | like_num | like_count | like_count |
-| `comment_count` | comments_count | comment_count | reply_count | comment_count | comment_count |
-| `comments` | ✅ 评论 | ✅ 答案+评论 | 🔲 预留 | 🔲 预留 | 🔲 预留 |
-| `tags` | — | topics | [bar_name] | tags | hashtags |
-| `image_urls` | — | image_list | image_urls | image_list | image_list |
-
-> 🔲 预留 = 评论采集暂未实现，字段已留好供后续接入
-  "keyword": "刷单",
-  "metadata": { "weibo_id": "...", "reposts_count": 0, ... }
-}
-```
-
-## 重新采集
+## 采集命令
 
 ```bash
-# 单平台
-python scripts/collect_examples.py --platforms weibo --max-pages 2 -k "刷单"
+# 微博+知乎+贴吧（快速 HTTP）
+python scripts/collect_examples.py -k "关键词" --platforms weibo,zhihu,tieba --max-pages 5
 
-# 全平台（需先 docker compose up -d 启动基础设施）
-python scripts/collect_examples.py --max-pages 2
+# 小红书（可见浏览器，需手动过验证码）
+python scripts/crawl/xiaohongshu_batch.py
 
-# 自定义关键词
-python scripts/collect_examples.py -k "接码,跑分,账号出售" --max-pages 1
+# 抖音（可见浏览器，需 msToken）
+python scripts/crawl/douyin_batch.py
+
+# 带评论采集
+python scripts/collect_examples.py --platforms xiaohongshu --with-comments
+python scripts/crawl/douyin_visible_collect.py -k "关键词" --with-comments
 ```
-
-> **注意**: 采集需要有效的 Cookie。如果 Cookie 过期，运行 `python login_edge.py <平台>` 重新登录（如 `python login_edge.py tieba`）。
->
-> 采集到的是各平台公开可⻅内容，仅供安全研究和竞赛评估使用。

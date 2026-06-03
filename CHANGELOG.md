@@ -1,5 +1,42 @@
 # BGI 变更日志
 
+## 2026-06-03 最终版 — 全平台48黑话词大规模采集 + 评论打通
+
+### 📊 采集成果: 5平台 8,239条
+
+| 平台 | 条数 | 评论 | 技术突破 |
+|------|:--:|:--:|------|
+| 小红书 | 2,556 | ✅ | SSR提取 + 可见浏览器 |
+| 微博 | 1,768 | ✅ | AJAX API |
+| 知乎 | 1,607 | ✅ | HTTP API |
+| 抖音 | 1,167 | ✅ | X-Bogus + 可见浏览器 |
+| 贴吧 | 1,141 | 🔲 | JSON API ~10/s |
+
+### 🆕 新增功能
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/comment_collector.py` | 统一评论采集: 响应拦截(小红书/抖音) + DOM提取(贴吧) |
+| `collectors/normalizer.py` | 5平台统一IntelItem格式，含评论字段 |
+| `collectors/spiders/tieba_api_spider.py` | 贴吧JSON API (~10/s, 300x提升) |
+| `collectors/spiders/douyin_xbogus.js` | 抖音X-Bogus签名生成 (487KB execjs) |
+| `scripts/crawl/douyin_batch.py` | 抖音分批拟人化采集 |
+| `scripts/crawl/xiaohongshu_batch.py` | 小红书分批拟人化采集 |
+| `scripts/crawl/douyin_get_tokens.py` | msToken交互式提取 |
+| `scripts/crawl/douyin_visible_collect.py` | 抖音可见浏览器+评论采集 |
+| `scripts/crawl/xiaohongshu_visible_collect.py` | 小红书可见浏览器采集 |
+
+### 🔧 修复
+
+- 小红书: API拦截→SSR提取 (window.__INITIAL_STATE__)
+- 小红书: source_url增加xsec_token参数，可直接访问
+- 抖音: 首页搜索框→X-Bogus签名API (page.evaluate fetch)
+- 贴吧: Playwright DOM→纯HTTP JSON API
+- IntelItem: 新增post_id/comments/tags/like_count等统一字段
+- 反检测增强: 高斯延迟/贝塞尔鼠标/随机滚动/拟人输入
+
+---
+
 ## 2026-06-03 (下午) — 贴吧 JSON API 加速（~300x 提升）🆕
 
 ### 🚀 贴吧从 Playwright → 纯 HTTP JSON API
