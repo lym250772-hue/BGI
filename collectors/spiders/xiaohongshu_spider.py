@@ -64,8 +64,8 @@ class XiaohongshuSearchSpider(BaseSpider):
     # 新版搜索 API（2024+）
     SEARCH_API = "/api/sns/web/v1/search/notes"
     PAGE_SIZE = 20
-    MIN_DELAY = 2.5
-    MAX_DELAY = 5.0
+    MIN_DELAY = 4.0     # 最小请求间隔（提高到4秒避免频率检测）
+    MAX_DELAY = 8.0     # 最大请求间隔（提高到8秒模拟人工浏览）
     MAX_RETRIES = 3
 
     def __init__(self, headless: bool = True):
@@ -164,6 +164,11 @@ class XiaohongshuSearchSpider(BaseSpider):
         if not self._page:
             raise RuntimeError("Spider 未启动，请先调用 start()")
 
+        # 检查登录状态
+        if not self._check_login():
+            logger.error("未登录或登录已过期，请运行: python login_edge.py xiaohongshu")
+            return []
+
         max_items = kwargs.get("max_items", 0)
         use_incremental = kwargs.get("incremental", False)
         start_page = kwargs.get("start_page", 1)
@@ -175,26 +180,30 @@ class XiaohongshuSearchSpider(BaseSpider):
             logger.info(f"搜索 [{keyword}] 第{page_num}/{max_pages}页")
 
             try:
-                # 方式1：API 拦截模式
-                self._api_capture_enabled = True
-                self._api_responses.clear()
-
                 search_url = self._build_search_url(keyword, page_num)
                 self._page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
-                time.sleep(2.5 + random.random() * 1.5)
 
-                # 检查拦截结果
-                items = []
-                if self._api_responses:
-                    items = self._parse_api_responses(self._api_responses, keyword)
-                    logger.debug(f"  API 拦截模式获取 {len(items)} 条")
+                # 🛡️ 模拟人工浏览：随机等待页面加载 + 随机滚动
+                page_load_wait = random.uniform(3.0, 6.0)
+                time.sleep(page_load_wait)
 
-                # 方式2：DOM 兜底
+                # 随机滚动 2-4 次（模拟浏览行为）
+                for _ in range(random.randint(2, 4)):
+                    scroll_distance = random.randint(300, 800)
+                    self._page.evaluate(f"window.scrollBy(0, {scroll_distance})")
+                    time.sleep(random.uniform(0.8, 2.0))
+
+                # 🆕 从 SSR 数据中提取搜索结果（window.__INITIAL_STATE__）
+                items = self._parse_ssr_data(keyword)
+                if items:
+                    logger.debug(f"  SSR 提取获取 {len(items)} 条")
+
+                # 兜底：DOM 解析
                 if not items:
-                    logger.debug("  API 拦截无数据，尝试 DOM 解析兜底")
+                    logger.debug("  SSR 无数据，尝试 DOM 解析兜底")
                     try:
                         self._page.wait_for_selector(
-                            ".feeds-page .note-item, .search-result-card, section.note-item",
+                            "section.note-item, .feeds-page section",
                             timeout=8000,
                         )
                     except Exception:
@@ -232,21 +241,162 @@ class XiaohongshuSearchSpider(BaseSpider):
             except Exception as exc:
                 logger.error(f"  第{page_num}页失败: {exc}")
                 self.stats["errors"] += 1
-                time.sleep(3.0 + random.random() * 3.0)
+                time.sleep(random.uniform(5.0, 10.0))
                 continue
-            finally:
-                self._api_capture_enabled = False
 
             if checkpoint_cb:
                 checkpoint_cb(keyword, page_num, len(all_items))
 
+            # 🛡️ 翻页间隔：随机延迟 + 偶尔长停顿（模拟阅读行为）
             self._adaptive_delay(consecutive_empty)
+            if page_num % random.randint(2, 3) == 0:
+                reading_pause = random.uniform(5.0, 12.0)
+                logger.debug(f"  模拟阅读停顿 {reading_pause:.1f}s")
+                time.sleep(reading_pause)
 
         logger.info(
             f"[{keyword}] 完成: {len(all_items)} 条 "
             f"({self.stats['pages_loaded']} pages, {self.stats['retries']} retries, {self.stats['errors']} errors)"
         )
         return all_items
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 🆕 SSR 数据提取（window.__INITIAL_STATE__）
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _parse_ssr_data(self, keyword: str) -> list[ParsedXiaohongshuItem]:
+        """从 window.__INITIAL_STATE__.search.feeds 提取搜索结果。"""
+        try:
+            raw = self._page.evaluate('''
+            () => {
+                const state = window.__INITIAL_STATE__;
+                if (!state || !state.search || !state.search.feeds) return [];
+                const feeds = state.search.feeds._rawValue || state.search.feeds;
+                if (!Array.isArray(feeds)) return [];
+                return feeds
+                    .filter(f => f.modelType === 'note' && f.noteCard)
+                    .map(f => ({
+                        id: f.id || '',
+                        displayTitle: f.noteCard.displayTitle || '',
+                        desc: f.noteCard.desc || '',
+                        type: f.noteCard.type || '',
+                        user: f.noteCard.user || {},
+                        interactInfo: f.noteCard.interactInfo || {},
+                        imageList: f.noteCard.imageList || [],
+                        tagList: f.noteCard.tagList || [],
+                        time: f.noteCard.time || 0,
+                        cover: f.noteCard.cover || {},
+                    }));
+            }
+            ''')
+            if not raw:
+                return []
+
+            items = []
+            seen_ids = set()
+
+            for r in raw:
+                note_id = r.get('id', '')
+                if not note_id or note_id in seen_ids:
+                    continue
+                seen_ids.add(note_id)
+
+                # 标题 + 描述
+                title = (r.get('displayTitle') or '').strip()
+                desc = (r.get('desc') or '').strip()
+                parts = []
+                if title:
+                    parts.append(f"【标题】{title}")
+                if desc and desc != title:
+                    parts.append(f"【正文】{desc}")
+                content_raw = '\n'.join(parts) if parts else '【无文本内容】'
+
+                # 作者 — SSR 使用 camelCase: nickname / nickName / userId
+                user = r.get('user', {})
+                author_name = (user.get('nickname') or user.get('nickName') or '')
+                author_id = str(user.get('userId', '') or user.get('id', ''))
+
+                # 互动 — SSR camelCase: likedCount / collectedCount / commentCount / sharedCount
+                interact = r.get('interactInfo', {})
+                like_count = int(interact.get('likedCount', 0))
+                collect_count = int(interact.get('collectedCount', 0))
+                comment_count = int(interact.get('commentCount', 0))
+
+                # 标签
+                tag_list = r.get('tagList', [])
+                tags = []
+                if isinstance(tag_list, list):
+                    for t in tag_list:
+                        if isinstance(t, dict):
+                            name = t.get('name', '')
+                            if name:
+                                tags.append(name)
+                        elif isinstance(t, str):
+                            tags.append(t)
+
+                # 图片 — SSR imageList[].url 或 imageList[].infoList[].url
+                img_list = r.get('imageList', [])
+                image_urls = []
+                if isinstance(img_list, list):
+                    for img in img_list:
+                        if isinstance(img, dict):
+                            url = img.get('url', '')
+                            if url:
+                                image_urls.append(url)
+                            else:
+                                info_list = img.get('infoList', [])
+                                if isinstance(info_list, list):
+                                    for info in info_list:
+                                        u = info.get('url', '')
+                                        if u:
+                                            image_urls.append(u)
+
+                # 类型
+                note_type = r.get('type', '')
+                content_type = 'text'
+                if note_type == 'video':
+                    content_type = 'video'
+                elif image_urls:
+                    content_type = 'image'
+
+                # 时间
+                time_ts = r.get('time', 0)
+                note_time = self.ts_to_datetime(time_ts / 1000) if time_ts > 1e12 else (
+                    self.ts_to_datetime(time_ts) if time_ts else datetime.utcnow()
+                )
+
+                item = ParsedXiaohongshuItem(
+                    content_raw=content_raw,
+                    content_type=content_type,
+                    source_url=f'https://www.xiaohongshu.com/explore/{note_id}',
+                    author_uid=author_id,
+                    author_username=author_name,
+                    note_id=note_id,
+                    collected_at=note_time,
+                    keyword=keyword,
+                    like_count=like_count,
+                    collect_count=collect_count,
+                    comment_count=comment_count,
+                    tags=tags,
+                    image_list=image_urls,
+                    metadata={
+                        'keyword': keyword,
+                        'note_id': note_id,
+                        'note_type': note_type,
+                        'has_image': bool(image_urls),
+                        'has_video': note_type == 'video',
+                        'tags': tags,
+                        'like_count': like_count,
+                        'collect_count': collect_count,
+                        'comment_count': comment_count,
+                    },
+                )
+                items.append(item)
+
+            return items
+        except Exception as e:
+            logger.debug(f'SSR 提取失败: {e}')
+            return []
 
     # ═══════════════════════════════════════════════════════════════════════════
     # API 响应解析
@@ -482,14 +632,30 @@ class XiaohongshuSearchSpider(BaseSpider):
             return False
         try:
             title = self._page.title()
-            # 小红书常见拦截
-            blocked_signals = ["验证", "登录", "滑块", "安全验证", "captcha", "verify"]
+            blocked_signals = ["验证", "滑块", "安全验证", "captcha", "verify"]
             if any(kw in title for kw in blocked_signals):
                 return True
-            # 检查是否跳转到了登录页
             url = self._page.url
             if "login" in url.lower() or "signin" in url.lower():
                 return True
             return False
         except Exception:
             return False
+
+    def _check_login(self) -> bool:
+        """检查登录状态。"""
+        if not self._page:
+            return False
+        try:
+            logged_in = self._page.evaluate('''
+            () => {
+                const body = document.body?.innerText || '';
+                if (body.includes('登录后查看')) return false;
+                const state = window.__INITIAL_STATE__;
+                if (state?.user?.isLogin) return true;
+                return !document.querySelector('.login-modal');
+            }
+            ''')
+            return bool(logged_in)
+        except Exception:
+            return True  # 无法检测时假定已登录
