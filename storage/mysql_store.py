@@ -1199,13 +1199,22 @@ class MySQLStore:
 
             with self.cursor() as c:
                 c.execute(
-                    """INSERT INTO agent_report
-                        (raw_id, report_type, title, summary, training_sample)
-                    VALUES (%s, 'training_sample', 'HITL训练样本', '人工标注修正',
-                            %s)
-                    ON DUPLICATE KEY UPDATE training_sample=VALUES(training_sample)""",
-                    (raw_id, sample),
+                    """UPDATE agent_report
+                       SET training_sample=%s,
+                           summary='人工标注修正',
+                           generated_by='hitl',
+                           created_at=NOW()
+                       WHERE raw_id=%s AND report_type='training_sample'""",
+                    (sample, raw_id),
                 )
+                if c.rowcount == 0:
+                    c.execute(
+                        """INSERT INTO agent_report
+                            (raw_id, report_type, title, summary, training_sample, generated_by)
+                        VALUES (%s, 'training_sample', 'HITL训练样本', '人工标注修正',
+                                %s, 'hitl')""",
+                        (raw_id, sample),
+                    )
             logger.info(f"Training sample generated for raw_id={raw_id}")
         except Exception as exc:
             logger.warning(f"Training sample generation failed for raw_id={raw_id}: {exc}")

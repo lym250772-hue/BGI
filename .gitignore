@@ -27,8 +27,10 @@ data/cleaned/
 data/modeling/
 data/models/**
 data/images/
+model_release/
 tmp/
 *.zip
+*.part*
 *.safetensors
 *.pt
 *.pth

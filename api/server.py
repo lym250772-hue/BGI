@@ -498,16 +498,6 @@ def reject_slang_candidate(req: SlangCandidateReviewRequest):
         return {"status": "error", "error": str(exc)}
 
 
-@app.get("/api/cheat-scripts")
-def list_cheat_scripts():
-    """List generated cheat scripts."""
-    try:
-        from storage.mysql_store import mysql
-        with mysql.cursor() as c:
-            c.execute("SELECT * FROM cheat_scripts ORDER BY created_at DESC LIMIT 50")
-            return {"items": c.fetchall()}
-    except Exception as exc:
-        return {"items": [], "error": str(exc)}
 
 
 # ============================================================================
@@ -561,6 +551,7 @@ def list_annotations(synced: Optional[str] = Query(default=None)):
                 )
             else:
                 c.execute("SELECT * FROM annotation_log ORDER BY created_at DESC LIMIT 100")
-            return {"total": c.rowcount, "items": c.fetchall()}
+            items = c.fetchall()
+            return {"total": len(items), "items": items}
     except Exception as exc:
         return {"total": 0, "items": [], "error": str(exc)}

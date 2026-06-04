@@ -96,7 +96,7 @@ class SlangNormalizeTool:
         slang_meaning_map = {}
         try:
             from storage.mysql_store import mysql as _mysql
-            for s in _mysql().list_slang("active"):
+            for s in _mysql.list_slang("active"):
                 slang_meaning_map[s.get("term", "")] = s.get("normalized_meaning", "")
         except Exception:
             pass

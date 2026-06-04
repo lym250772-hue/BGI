@@ -2,20 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any
-
-
-def _safe_json(value: Any, default: Any):
-    if value is None:
-        return default
-    if isinstance(value, (list, dict)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
 
 
 def _truncate(value: str | None, limit: int = 120) -> str:

@@ -63,8 +63,8 @@ def _render_chatbi_result(result: dict):
         chart_df[y_col] = pd.to_numeric(chart_df[y_col], errors="coerce").fillna(0)
         if chart == "line":
             st.line_chart(chart_df.set_index(x_col), width="stretch")
-    else:
-        st.bar_chart(chart_df.set_index(x_col), width="stretch")
+        else:
+            st.bar_chart(chart_df.set_index(x_col), width="stretch")
 
     st.dataframe(df, hide_index=True, width="stretch")
 
