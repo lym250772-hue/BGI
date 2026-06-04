@@ -43,3 +43,4 @@ logs/
 
 # Claude Code
 .claude/
+data/browser_profiles/

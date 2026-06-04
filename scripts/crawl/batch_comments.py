@@ -187,12 +187,7 @@ def main():
                 # 每5条暂停较久
                 if (i+1) % 5 == 0:
                     pause = gauss_delay(8, 18)
-                    logger.info(f"    ⏸ 休息 {pause:.0f}s...")
-                    # 浏览首页模拟真实行为
-                    if plat == "xiaohongshu":
-                        page.goto("https://www.xiaohongshu.com", wait_until="domcontentloaded", timeout=15000)
-                    elif plat == "douyin":
-                        page.goto("https://www.douyin.com/jingxuan", wait_until="domcontentloaded", timeout=15000)
+                    logger.info(f"    ⏸ 休息 {pause:.0f}s (不切换页面)")
                     time.sleep(pause)
                 else:
                     time.sleep(gauss_delay(3, 7))
