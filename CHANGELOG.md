@@ -1,5 +1,252 @@
 # BGI 变更日志
 
+## 2026-06-03 (下午) — 贴吧 JSON API 加速（~300x 提升）🆕
+
+### 🚀 贴吧从 Playwright → 纯 HTTP JSON API
+
+| 指标 | 旧方案 | 新方案 |
+|------|:--:|:--:|
+| 技术 | Playwright DOM 解析 | HTTP `requests` + JSON API |
+| 速度 | **0.03 条/秒** | **~10 条/秒** |
+| 提升 | — | **~300x** |
+| 内存 | ~400MB | ~50MB |
+
+### 🔍 发现的内部 API
+
+- 端点: `tieba.baidu.com/mo/q/search/multsearch`
+- 方法: GET，返回 JSON
+- 认证: Cookie（BDUSS + BAIDUID），**无需 sign 参数**
+- 数据: 完整主帖内容 + 作者 + 图片列表 + 回复数
+
+### 📁 新增文件
+
+| 文件 | 说明 |
+|------|------|
+| `collectors/spiders/tieba_api_spider.py` | 纯 HTTP API Spider，兼容旧 search_and_parse() 接口 |
+| `scripts/crawl/tieba_api_sniff.py` | API 抓包脚本（Playwright 网络拦截） |
+| `scripts/crawl/test_tieba_api.py` | 速度对比测试脚本 |
+
+### ⚠️ 已知限制
+
+- 回复 API (`c.tieba.baidu.com/c/f/pb`) 需额外签名，暂时不可用
+- 如需回复内容，可回退到旧 Playwright `tieba_spider.py`
+
+---
+
+## 2026-06-03 (上午) — 采集层恢复 + 示例数据更新
+
+### ✏️ 恢复核心文件
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/spiders/base_spider.py` | Spider 基类（Cookie管理/反爬/检查点） |
+| `collectors/spiders/weibo_api_spider.py` | 微博 AJAX API（~8条/秒，含评论采集） |
+| `collectors/spiders/douyin_spider.py` | 抖音首页搜索+正则（含 image_list/video_cover_url） |
+| `collectors/spiders/xiaohongshu_spider.py` | 小红书 API拦截+DOM（含 image_list） |
+| `collectors/base.py, registry.py` | IntelItem 统一格式 + 平台注册表 |
+| `collectors/douyin_collector.py, xiaohongshu_collector.py` | 抖音/小红书 Collector |
+
+### 📊 示例数据更新
+
+| 平台 | 条数 | 特点 |
+|------|:--:|------|
+| weibo | 380 | 5关键词x5页，含评论 |
+| zhihu | 375 | 5关键词x5页，含答案+评论 |
+| xiaohongshu | 180 | 3关键词x3页，含图片列表 |
+| douyin | 123 | 3关键词x3页，含封面+图片 |
+| tieba | 18 | 3关键词x2页，含回复 |
+
+### 🔧 修复
+
+- `collect_examples.py`：微博接入评论采集、贴吧启用回复采集、清除增量状态
+- `cleaner/__init__.py`：移除已删除的 media_processor 导入
+- 文档全部更新至当前状态
+
+---
+
+## 2026-06-02 — 大规模多通道并发采集 + 知乎API加速 + 评论采集 + 图文存储 (v2.0)
+
+### 🆕 并发编排引擎
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/orchestrator.py` | 多通道并发编排器 — 每平台独立线程并行，RateLimiter令牌桶限速，ProgressTracker实时统计，SIGINT优雅停机+断点保存 |
+| `storage/write_pipeline.py` | 生产者-消费者写入管道 — Queue背压，单consumer线程批量INSERT，失败自动重试（指数退避） |
+| `main.py collect-all` 命令 | `python main.py collect-all -k "刷单,接码" --max-pages 3` 一键全通道并发 |
+
+### 🆕 知乎纯 HTTP API Spider
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/spiders/zhihu_api_spider.py` | 纯 requests 知乎采集 — 搜索+答案+评论三合一，3-5条/秒（15-25x提升），零浏览器开销 |
+| orchestrator 集成 | 知乎自动走 HTTP 通道，不再启动 Playwright |
+
+### 🆕 评论/回复采集
+
+| 平台 | 状态 | 说明 |
+|------|:--:|------|
+| 微博 | ✅ | `get_comments()` 已接入collector，评论生成独立 IntelItem (content_type="comment") |
+| 知乎 | ✅ | ZhihuAPISpider 内置 `get_comments()`，评论嵌套在 metadata.answers[].comments |
+| 贴吧 | ✅ | `_fetch_thread_detail()` 已在 fetch_replies 模式下工作 |
+| 小红书 | ❌ | 需 X-s/X-t 签名，当前仅记录 comment_count |
+| 抖音 | ❌ | 需 msToken/Bogus 签名 |
+
+### 🆕 图文数据采集 & 存储
+
+| 模块 | 说明 |
+|------|------|
+| `collectors/base.py` | IntelItem 新增 `image_urls` + `video_cover_url` 字段 |
+| `collectors/orchestrator.py` | `_parsed_to_dict()` 修复 `media_urls` 永远为空的 BUG，新增 `_collect_media_urls()` + `_compute_media_hash()` |
+| `collectors/spiders/douyin_spider.py` | `ParsedDouyinItem` 新增 `image_list`，图集图片 URL 不再丢弃 |
+| `storage/media_store.py` | 图片下载+持久存储 — 线程池并发下载，MD5去重，自动格式检测，`data/images/{platform}/{raw_id}/` |
+
+### 🔧 断点续采接入
+
+| 文件 | 说明 |
+|------|------|
+| `tieba_spider.py` | 接入 `start_page` + `checkpoint_callback`，支持中断恢复 |
+| `zhihu_spider.py` | 同上（while循环模式）|
+| `xiaohongshu_spider.py` | 同上（for循环模式）|
+| `douyin_spider.py` | 同上（首页导航模式，关键词级恢复）|
+
+### 📄 文档 & 示例
+
+| 变更 | 说明 |
+|------|------|
+| `docs/操作手册.md` | 完全重写 — 全通道采集/完整工作流/命令速查/故障排查 |
+| `docs/数据采集层技术文档.md` | v3.0 更新 — 新架构图/渠道矩阵/并发引擎/图片管道 |
+| `examples/` | 5平台72+条真实黑灰产样本（微博75/知乎39/小红书80/抖音44/贴吧8） |
+| `scripts/collect_examples.py` | 一键样本采集脚本 |
+| `examples/README.md` | 数据格式说明 + 重新采集指南 |
+
+---
+
+## 2026-06-02 — 小红书/抖音采集器 + Emoji翻译 + Metadata增强 + 交互式登录
+
+### 🆕 新增平台
+
+| 模块 | 说明 |
+|------|------|
+| 小红书 Spider | `collectors/spiders/xiaohongshu_spider.py` — API拦截+DOM兜底，提取标题/正文/标签/图片列表/赞藏评，支持灰黑产笔记采集 |
+| 小红书 Collector | `collectors/xiaohongshu_collector.py` — ParsedXiaohongshuItem → IntelItem |
+| 抖音 Spider | `collectors/spiders/douyin_spider.py` — page.evaluate(fetch)+SSR+DOM三路解析，提取描述/话题/播放量/时长/封面图 |
+| 抖音 Collector | `collectors/douyin_collector.py` — ParsedDouyinItem → IntelItem |
+| 测试脚本 | `tests/test_xiaohongshu_search.py` / `tests/test_douyin_search.py` |
+
+### 🆕 Emoji 语义翻译系统
+
+| 模块 | 说明 |
+|------|------|
+| `cleaner/emoji_translator.py` | 120+条目灰黑产emoji词典，9大分类(contact/money/gambling/adult/illegal/gaming/trust/platform/identity)，全面Unicode覆盖(60+block)，translate/extract_emojis/get_risk_signals API，零依赖零API开销 |
+| 修复 Unicode 检测 | `BaseSpider.contains_emoji()` 扩展到60+ Unicode block（补充8个缺失block） |
+
+### 🆕 Metadata 增强分类
+
+| 模块 | 说明 |
+|------|------|
+| `analyzer/metadata_classifier.py` | L1.5分类器：50+ hashtag规则覆盖7大风险类别，播放量异常检测，短视频导流检测，零API开销 |
+| 风险评分增强 | 新增Factor 7 `metadata_signals` 权重0.10，调整各因子权重 |
+
+### 🆕 异步 OCR 管道
+
+| 模块 | 说明 |
+|------|------|
+| `cleaner/media_bridge.py` | 异步图片下载+PaddleOCR管道，24h缓存，写入dwd_clean_intel.ocr_text/merged_text |
+| `main.py ocr` 命令 | `python main.py ocr -p douyin,xiaohongshu -l 100` |
+
+### 🆕 交互式登录
+
+| 功能 | 说明 |
+|------|------|
+| `BaseSpider.interactive_login()` | 弹出浏览器→手动登录→按Enter→自动保存Cookie |
+| `main.py login` 命令 | `python main.py login -p weibo/zhihu/tieba/xiaohongshu/douyin` |
+| Cookie检查 | collect命令自动检查Cookie，缺失时提示login |
+
+### ✏️ 管道增强
+
+| 变更 | 说明 |
+|------|------|
+| 平台感知噪声过滤 | `is_noise()` 新增platform/metadata参数，抖音min=2chars，emoji+hashtag短文本不丢弃 |
+| Emoji翻译步骤 | `process()` 新增Step 0 emoji翻译 + Step 0.5 metadata增强 |
+| 修复正则bug | `LOW_VALUE_PATTERNS` 中 `\\u` 转义修复为正确Unicode范围 |
+| clean命令适配 | 传递platform+metadata到管道，使用真实noise_score |
+
+### 🔒 安全
+
+| 变更 | 说明 |
+|------|------|
+| 根目录 `.gitignore` | 保护.idea/.claude/.pytest_cache/*.docx |
+| 调试文件清理 | 删除15+含个人信息的截图/HTML/输出文件 |
+| Cookie文件验证 | `data/raw/` 已被gitignore完全排除 |
+
+### ✅ 测试验证
+
+| 测试 | 结果 |
+|------|:----:|
+| 37个单元测试 | 全部通过 |
+| 知乎端到端(30关键词) | 501条/172秒，零错误 |
+| 清洗管道(501条) | 保留258条(51.5%)，命中高危254条 |
+| Emoji翻译器 | 120+条目词典，<1ms响应 |
+
+---
+
+## 2026-06-01 — 采集层大规模重构 + 清洗层高危过滤
+
+### 采集层重构
+
+| 模块 | 变更 |
+|------|------|
+| BaseSpider | 🆕 `collectors/spiders/base_spider.py` — 三平台公共基类，统一浏览器生命周期、UA池(7个)、Cookie管理(EditThisCookie格式标准化)、三级重试、断点续采、自适应延迟、请求拦截 |
+| 知乎 Spider | ✏️ 重写为 API 直调模式 (`/api/v4/search_v3`)，零 HTML 解析，不受页面改版影响。支持无限翻页、增量/全量双模式、回答+评论采集 |
+| 贴吧 Spider | ✏️ 重写 DOM 提取，适配新版 React 渲染页面。networkidle 等待渲染、通用帖子链接遍历 |
+| 微博 Spider | ✏️ 继承 BaseSpider，代码量减少 55% |
+| 采集器注册 | 🆕 `collectors/registry.py` — 6 平台工厂映射 |
+| Telegram | 🆕 `collectors/telegram_collector.py` |
+| Web 通用 | 🆕 `collectors/web_collector.py` (stub) |
+
+### 采集器核心能力
+
+| 能力 | 说明 |
+|------|------|
+| 批量入库 | `executemany` 100~200 条/批，速度 10x+ |
+| 无限翻页 | `max_pages=0` 自动翻到空结果 |
+| 全量/增量 | `--no-incremental` 全量 / `--incremental` 增量 |
+| 关键词文件 | `--keyword-file data/grey_keywords.json` 85 个灰黑产关键词 |
+| 评论采集 | 知乎默认开启 `fetch_comments`，存储于 `metadata.answers[].comments[]` |
+| 回复关联 | 贴吧回复存储于 `metadata.replies[]`，每条含 author/content/time/floor |
+
+### 清洗层高危过滤
+
+| 变更 | 说明 |
+|------|------|
+| 实体检测 | `has_entities()` — 检测微信/QQ/手机/URL/群号等 10 种模式 |
+| 风险判定 | `is_risk_relevant()` — 高危关键词 OR 含可追溯实体 → 保留；否则丢弃 |
+| 保留率 | 55.3% (1,073/1,942) |
+
+### 数据采集实测 (知乎)
+
+| 指标 | 数值 |
+|------|------|
+| 采集总量 | 2,271 条 |
+| 清洗保留 | 1,073 条 (高危) |
+| 关键词覆盖 | 50 个灰黑产关键词 |
+| 错误率 | 0% |
+| 速度 | 3.3 条/秒 (无回答模式更快) |
+
+### Cookie 管理改进
+
+- 环境变量 → `data/raw/{platform}_cookies.json` 文件化
+- EditThisCookie 导出格式自动标准化 (`no_restriction` → `None`, `expirationDate` → `expires`)
+- `.env` 中旧 Cookie 已清除，文件优先
+
+### 贴吧已知问题
+
+- 百度安全验证频繁触发
+- 新版 React 页面 `networkidle` 加载超时
+- 搜索页与首页 DOM 混合渲染，帖子提取不稳定
+
+---
+
 ## 2026-05-25 (5) — 三平台采集测试验证 + 微博反爬增强
 
 ### 三平台采集渠道实测通过

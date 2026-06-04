@@ -1,56 +1,60 @@
-# 多源数据采集示例
+# 示例数据 — 多源采集真实样本
 
-本目录存放各平台数据采集接口的示例输出，供协作者对照开发使用。
+本目录存放从各平台采集到的真实黑灰产相关样本数据，用于分析引擎开发、测试和演示。
 
-## 文件说明
+## 采集概况（2026-06-03 最终版）
 
-| 文件 | 平台 | 采集量 | 关键词 | 说明 |
-|------|------|:------:|--------|------|
-| `weibo_sample.json` | 微博 | 20条 | 刷单 | 含用户名、UID、时间、内容类型、链接等完整字段 |
-| `zhihu_sample.json` | 知乎 | 10条 | 刷单 | 含问题、摘要、完整回答（赞数/评论数）、话题标签 |
-| `tieba_sample.json` | 贴吧 | 4条 | 刷单 | 含帖吧名、用户名、回复数、正文、表情/图片检测 |
+| 文件 | 平台 | 条数 | 关键词 | 采集技术 | 评论 |
+|------|------|:--:|------|------|:--:|
+| `weibo_sample.json` | 微博 | **1,768** | 48黑话词 | AJAX API | ✅ |
+| `zhihu_sample.json` | 知乎 | **1,607** | 48黑话词 | HTTP API | ✅ |
+| `xiaohongshu_sample.json` | 小红书 | **2,556** | 48黑话词 | SSR提取 + 可见浏览器 | ✅ |
+| `douyin_sample.json` | 抖音 | **1,167** | 48黑话词 | 可见浏览器+X-Bogus API | ✅ |
+| `tieba_sample.json` | 贴吧 | **1,141** | 48黑话词 | JSON API (~10条/秒) | 🔲 |
+| `telegram_sample.json` | Telegram | — | — | Telethon（需 API ID/Hash） | — |
 
-## 数据结构
+> **合计**: **8,239 条** / ~21MB / 5 平台 / 48 黑话关键词全覆盖
 
-所有平台输出统一为以下 JSON 格式：
+### 48个黑话关键词
+```
+714高炮, AB贷, 上车, 下车, 云手机, 人脸, 代下, 代理IP, 众包, 八件套,
+养号, 出号, 刷单, 千粉, 卡商, 反卤, 发卡, 可开播, 号商, 四件套,
+大肉, 引流, 打码, 报单, 挂机, 接码, 搬砖, 撞库, 数字人, 料商,
+无人直播, 无损套, 日结, 模拟器, 水房, 洗号, 狗推, 猫池, 白户,
+破盾, 羊头, 羊腿, 群控, 薅羊毛, 融车, 跑分, 车手, 黄牛
+```
+
+## 数据格式
+
+所有平台统一使用 IntelItem 格式，含 `comments` 评论数组。详见 `collectors/base.py` 和 `collectors/normalizer.py`。
 
 ```json
 {
-  "platform": "平台标识",
-  "keyword": "搜索关键词",
-  "count": 采集数量,
-  "items": [
-    {
-      "platform": "平台名",
-      "author_username": "作者用户名",
-      "content_raw": "原始内容文本",
-      "source_url": "来源链接",
-      "collected_at": "采集时间 (ISO 8601)",
-      "keyword": "匹配关键词",
-      ...
-    }
-  ]
+  "platform": "xiaohongshu",
+  "post_id": "67b7216c0000000009014ba3",
+  "content_raw": "【标题】香港拆单任务真相曝光...",
+  "source_url": "https://www.xiaohongshu.com/explore/...?xsec_token=...",
+  "author_username": "香港警察",
+  "like_count": 121, "comment_count": 112,
+  "comments": [{"id":"...", "author_username":"...", "content":"...", "type":"comment"}],
+  "tags": ["刷单"], "image_urls": ["https://..."],
+  "metadata": {"note_id": "...", "xsec_token": "...", "has_image": true}
 }
 ```
 
-## 采集接口
-
-各平台采集测试命令：
+## 采集命令
 
 ```bash
-# 微博（20条/页）
-python tests/test_weibo_search.py "刷单" 1
+# 微博+知乎+贴吧（快速 HTTP）
+python scripts/collect_examples.py -k "关键词" --platforms weibo,zhihu,tieba --max-pages 5
 
-# 知乎（10条/页，含回答）
-python tests/test_zhihu_search.py "刷单" 1
+# 小红书（可见浏览器，需手动过验证码）
+python scripts/crawl/xiaohongshu_batch.py
 
-# 贴吧（4~50条/页，含回复）
-python tests/test_tieba_search.py "刷单" 1
+# 抖音（可见浏览器，需 msToken）
+python scripts/crawl/douyin_batch.py
+
+# 带评论采集
+python scripts/collect_examples.py --platforms xiaohongshu --with-comments
+python scripts/crawl/douyin_visible_collect.py -k "关键词" --with-comments
 ```
-
-## 注意事项
-
-- 贴吧反爬较强，短时间多次请求会触发百度滑块验证码，建议采集间隔 > 5 分钟
-- 知乎需要有效的 `z_c0` Cookie，JS 注入方式与常规 `add_cookies` 不同
-- 微博 Cookie 有较长有效期，部分字段（如长文/视频检测）需要展开全文
-- Telegram 需要 API ID/Hash，目前未配置

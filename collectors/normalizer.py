@@ -179,11 +179,17 @@ def normalize_xiaohongshu(item: Any) -> IntelItem:
     # 🆕 评论格式预留（当前无评论采集）
     # 结构: [{"id": "", "author_username": "", "content": "", "like_count": 0, ...}, ...]
 
+    # xsec_token（访问完整笔记）
+    xsec = meta.get("xsec_token", "")
+    source_url = getattr(item, "source_url", "")
+    if xsec and "xsec_token" not in source_url:
+        source_url = f"https://www.xiaohongshu.com/explore/{getattr(item, 'note_id', '')}?xsec_token={xsec}"
+
     return IntelItem(
         platform="xiaohongshu",
         content_raw=getattr(item, "content_raw", ""),
         content_type=getattr(item, "content_type", "text"),
-        source_url=getattr(item, "source_url", ""),
+        source_url=source_url,
         author_uid=str(getattr(item, "author_uid", "")),
         author_username=getattr(item, "author_username", ""),
         post_id=str(getattr(item, "note_id", "")),
@@ -197,6 +203,7 @@ def normalize_xiaohongshu(item: Any) -> IntelItem:
             "note_id": getattr(item, "note_id", ""),
             "tags_original": tags,
             "interact_info": meta.get("interact_info", {}),
+            "xsec_token": xsec,
         },
     )
 

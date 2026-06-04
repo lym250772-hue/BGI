@@ -185,6 +185,10 @@ def main():
                         help="Comma-separated platforms (default: all available)")
     parser.add_argument("--output-dir", default=str(EXAMPLES_DIR),
                         help="Output directory (default: examples/)")
+    parser.add_argument("--with-comments", action="store_true",
+                        help="采集主帖后继续采集评论（会增加耗时）")
+    parser.add_argument("--max-comment-items", type=int, default=20,
+                        help="最多为多少条帖子采集评论 (default: 20)")
     args = parser.parse_args()
 
     out_dir = Path(args.output_dir)
@@ -244,6 +248,27 @@ def main():
         # 🆕 归一化为统一 IntelItem 格式
         normalized = normalize_items(platform, all_items)
         logger.info("[{}] Normalized {} items to unified IntelItem format", platform, len(normalized))
+
+        # 🆕 评论采集（小红书：响应拦截；抖音：需可见浏览器；贴吧：旧版DOM）
+        if args.with_comments and platform == "xiaohongshu":
+            logger.info("[{}] 开始采集评论 (最多{}条帖子)...", platform, args.max_comment_items)
+            try:
+                from collectors.comment_collector import enrich_comments
+                from collectors.spiders.xiaohongshu_spider import XiaohongshuSearchSpider
+                cs = XiaohongshuSearchSpider(headless=True)
+                cs.start()
+                serialized = [_serialize(item) for item in normalized]
+                enriched = enrich_comments(cs._page, platform, serialized, max_items=args.max_comment_items)
+                # 将评论合并回 IntelItem
+                for i, e in enumerate(enriched):
+                    if i < len(normalized) and e.get("comments"):
+                        normalized[i].comments = e["comments"]
+                        normalized[i].comment_count = max(normalized[i].comment_count, len(e["comments"]))
+                cs.close()
+                with_comments = sum(1 for item in normalized if item.comments)
+                logger.info("[{}] 评论采集完成: {}篇有评论", platform, with_comments)
+            except Exception as e:
+                logger.error("[{}] 评论采集失败: {}", platform, e)
 
         # Save to file
         out_path = out_dir / f"{platform}_sample.json"
