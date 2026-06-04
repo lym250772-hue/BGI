@@ -2,18 +2,18 @@
 
 本目录存放从各平台采集到的真实黑灰产相关样本数据，用于分析引擎开发、测试和演示。
 
-## 采集概况（2026-06-03 最终版）
+## 采集概况（2026-06-04 v4.1）
 
-| 文件 | 平台 | 条数 | 关键词 | 采集技术 | 评论 |
-|------|------|:--:|------|------|:--:|
-| `weibo_sample.json` | 微博 | **1,768** | 48黑话词 | AJAX API | ✅ |
-| `zhihu_sample.json` | 知乎 | **1,607** | 48黑话词 | HTTP API | ✅ |
-| `xiaohongshu_sample.json` | 小红书 | **2,556** | 48黑话词 | SSR提取 + 可见浏览器 | ✅ |
-| `douyin_sample.json` | 抖音 | **1,167** | 48黑话词 | 可见浏览器+X-Bogus API | ✅ |
-| `tieba_sample.json` | 贴吧 | **1,141** | 48黑话词 | JSON API (~10条/秒) | 🔲 |
-| `telegram_sample.json` | Telegram | — | — | Telethon（需 API ID/Hash） | — |
+| 文件 | 平台 | 帖子 | 有评论 | 总评论 | 采集技术 |
+|------|------|:--:|:--:|:--:|------|
+| `weibo_sample.json` | 微博 | 1,768 | 362 | 2,461 | AJAX API |
+| `zhihu_sample.json` | 知乎 | 1,607 | 821 | 10,326 | HTTP API |
+| `xiaohongshu_sample.json` | 小红书 | 2,556 | 222 | 2,986 | SSR + v3持久化浏览器 |
+| `douyin_sample.json` | 抖音 | 1,167 | 233 | 1,267 | X-Bogus + v3持久化浏览器 |
+| `tieba_sample.json` | 贴吧 | 1,141 | 192 | 876 | JSON API + DOM回复 |
+| `telegram_sample.json` | Telegram | — | — | — | Telethon（待配置） |
 
-> **合计**: **8,239 条** / ~21MB / 5 平台 / 48 黑话关键词全覆盖
+> **合计**: **8,239帖 / 1,830篇有评论 / 17,916条评论** / 5平台 / 48黑话关键词
 
 ### 48个黑话关键词
 ```
@@ -48,13 +48,11 @@
 # 微博+知乎+贴吧（快速 HTTP）
 python scripts/collect_examples.py -k "关键词" --platforms weibo,zhihu,tieba --max-pages 5
 
-# 小红书（可见浏览器，需手动过验证码）
+# 小红书/抖音 评论采集（v3 持久化浏览器，首次登录后永久复用）
+python scripts/crawl/xiaohongshu_comments_v3.py --max 200
+python scripts/crawl/douyin_comments_v3.py --max 200
+
+# 全新采集（可见浏览器）
 python scripts/crawl/xiaohongshu_batch.py
-
-# 抖音（可见浏览器，需 msToken）
 python scripts/crawl/douyin_batch.py
-
-# 带评论采集
-python scripts/collect_examples.py --platforms xiaohongshu --with-comments
-python scripts/crawl/douyin_visible_collect.py -k "关键词" --with-comments
 ```
