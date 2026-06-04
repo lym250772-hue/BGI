@@ -24,8 +24,11 @@ env/
 # Data (generated/collected)
 data/raw/
 data/cleaned/
+data/modeling/
 data/models/**
+data/images/
 tmp/
+*.zip
 *.safetensors
 *.pt
 *.pth
