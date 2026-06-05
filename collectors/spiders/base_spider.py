@@ -68,6 +68,10 @@ class BaseSpider(ABC):
     # ── 浏览器通道 ──────────────────────────────────────────────────────────
     BROWSER_CHANNEL: str | None = None  # None=Playwright Chromium, 'msedge'=系统Edge
 
+    # ── v3 持久化浏览器 ─────────────────────────────────────────────────────
+    PERSISTENT_BROWSER: bool = False  # True = 使用 launch_persistent_context (v3模式)
+    PERSISTENT_PROFILE_DIR: str | None = None  # 持久化profile目录
+
     def __init__(self, headless: bool = True):
         self.headless = headless
         self._playwright = None
@@ -78,6 +82,7 @@ class BaseSpider(ABC):
         self._cookie_file = os.path.join(
             settings.raw_data_dir.as_posix(), f"{self.PLATFORM}_cookies.json"
         )
+        self._session_established = False
 
         # ── 增量采集状态 ────────────────────────────────────────────────
         self._last_collected_at: dict[str, datetime] = {}
@@ -177,6 +182,160 @@ class BaseSpider(ABC):
             logger.info(f"{self.PLATFORM} Spider 已关闭")
         if self._playwright:
             self._playwright.stop()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # v3 持久化浏览器启动（用于强反爬平台如闲鱼）
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def start_persistent(self, user_data_dir: str = None):
+        """使用持久化浏览器上下文启动（v3模式）。
+
+        一次登录永久复用，Cookie/session/LocalStorage 全部保留在磁盘上。
+        适用于反爬极严的平台（如阿里系闲鱼），需要非headless + 真实浏览器指纹。
+
+        Args:
+            user_data_dir: 浏览器profile目录路径
+        """
+        profile_dir = user_data_dir or self.PERSISTENT_PROFILE_DIR
+        if not profile_dir:
+            profile_dir = os.path.join(
+                settings.raw_data_dir.as_posix(),
+                "browser_profiles", self.PLATFORM,
+            )
+        os.makedirs(profile_dir, exist_ok=True)
+
+        self._playwright = sync_playwright().start()
+        launch_kwargs = {
+            "headless": False,  # 持久化模式必须可见，否则极易被检测
+            "user_data_dir": profile_dir,
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-features=TranslateUI",
+            ],
+            "channel": "msedge",  # Edge内核，真实浏览器指纹
+            "locale": "zh-CN",
+            "viewport": {"width": 1440, "height": 900},
+        }
+
+        try:
+            self._context = self._playwright.chromium.launch_persistent_context(
+                **launch_kwargs,
+            )
+        except Exception:
+            # Edge不可用时降级为默认Chromium（但反爬效果会降低）
+            logger.warning("Edge不可用，降级为默认Chromium")
+            del launch_kwargs["channel"]
+            self._context = self._playwright.chromium.launch_persistent_context(
+                **launch_kwargs,
+            )
+
+        self._page = self._context.new_page()
+        self._page.add_init_script(
+            "Object.defineProperty(navigator,'webdriver',{get:()=>false});"
+        )
+
+        # 检查登录状态（更精确的检测：查找登录表单/按钮而非页面文字）
+        try:
+            self._page.goto(self.HOME_URL, wait_until="domcontentloaded", timeout=20000)
+            time.sleep(3)
+            page_text = self._page.content()
+            # 检测"未登录"特征（登录表单/弹窗，而非导航栏的"登录"链接）
+            is_not_logged_in = (
+                "手机号登录" in page_text or     # 登录页面标题
+                "扫码登录" in page_text or       # 登录页面tab
+                "验证码登录" in page_text or     # 登录方式
+                "请先登录" in page_text or       # 需要登录弹窗
+                "立即登录" in page_text          # 登录按钮
+            )
+            if is_not_logged_in or "验证" in page_text:
+                if is_not_logged_in:
+                    logger.warning("检测到登录页面，请在浏览器中手动完成登录")
+                else:
+                    logger.warning("检测到验证页面，请在浏览器中完成验证")
+                # 等待用户手动登录（最多等待3分钟，已通过interactive_login登录过）
+                for i in range(90):
+                    time.sleep(2)
+                    try:
+                        page_text = self._page.content()
+                        still_not_logged = (
+                            "手机号登录" in page_text
+                            or "扫码登录" in page_text
+                            or "请先登录" in page_text
+                        )
+                        if not still_not_logged and "验证" not in page_text:
+                            self._logged_in = True
+                            logger.info("手动登录/验证完成")
+                            break
+                    except Exception:
+                        pass
+                else:
+                    logger.warning("登录等待超时（3分钟），继续尝试采集")
+            else:
+                self._logged_in = True
+                logger.info("检测到已登录状态（持久化Profile复用成功）")
+        except Exception as exc:
+            logger.warning(f"登录状态检测失败: {exc}")
+
+        self._session_established = self._logged_in
+
+        # 加载增量 + 断点状态
+        self._load_incremental_state()
+        self._load_checkpoint()
+
+        logger.info(
+            f"{self.PLATFORM} Spider 已启动（v3持久化模式）"
+            f"（登录态={'是' if self._logged_in else '否'}，"
+            f"Profile={profile_dir}）"
+        )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # v3 人类行为模拟（贝塞尔鼠标 + 高斯滚动 + 键盘打字）
+    # ═══════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def gauss_delay(mi: float, ma: float) -> float:
+        """高斯分布延迟。"""
+        mid = (mi + ma) / 2
+        return max(mi, min(ma, random.gauss(mid, (ma - mi) / 4)))
+
+    def human_mouse(self):
+        """随机贝塞尔鼠标移动（15-30步）。"""
+        try:
+            if self._page:
+                self._page.mouse.move(
+                    random.randint(200, 1200),
+                    random.randint(200, 700),
+                    steps=random.randint(15, 30),
+                )
+        except Exception:
+            pass
+
+    def human_scroll(self):
+        """模拟人类滚动：随机步长，12-15%概率回滚。"""
+        if not self._page:
+            return
+        try:
+            for _ in range(random.randint(1, 3)):
+                dy = random.randint(100, 400)
+                if random.random() < 0.12:
+                    dy = -random.randint(50, 150)  # 回滚
+                self._page.evaluate(f"window.scrollBy(0, {dy})")
+                time.sleep(random.uniform(0.2, 0.6))
+        except Exception:
+            pass
+
+    def browse_homepage(self):
+        """偶尔（~10%概率）模拟浏览首页行为。"""
+        if random.random() < 0.1 and self._page:
+            try:
+                self.human_mouse()
+                self._page.goto(self.HOME_URL, wait_until="domcontentloaded", timeout=15000)
+                self.human_scroll()
+                self.human_mouse()
+                time.sleep(BaseSpider.gauss_delay(1, 4))
+            except Exception:
+                pass
 
     # ═══════════════════════════════════════════════════════════════════════
     # Cookie 管理
@@ -560,8 +719,14 @@ class BaseSpider(ABC):
             logger.info(f"  ✅ 成功保存 {len(cookies)} 条 Cookie → {cookie_file}")
 
             # 显示关键 Cookie 名称供确认
-            key_names = {"SUB", "BDUSS", "z_c0", "d_c0", "web_session", "a1",
-                         "s_v_web_id", "passport_csrf_token", "ttwid"}
+            key_names = {
+                # 微博 / 贴吧 / 知乎 / 小红书 / 抖音
+                "SUB", "BDUSS", "z_c0", "d_c0", "web_session", "a1",
+                "s_v_web_id", "passport_csrf_token", "ttwid",
+                # 闲鱼 / 阿里系
+                "_m_h5_tk", "_m_h5_tk_enc", "cookie2", "_tb_token_",
+                "isg", "xlly_s", "unb", "cna", "sgcookie",
+            }
             found_keys = [c["name"] for c in cookies if c["name"] in key_names]
             if found_keys:
                 logger.info(f"  🔑 检测到关键 Cookie: {', '.join(found_keys)}")

@@ -184,8 +184,7 @@ class EntityExtractor:
                 model=settings.llm_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=500,
-            )
+                max_tokens=500)
             return json.loads(resp.choices[0].message.content)
         except Exception as exc:
             logger.error(f"LLM entity extraction failed: {exc}")
@@ -224,7 +223,7 @@ class EntityExtractor:
 
         high_value_hit = pre_llm_types & {
             "wechat", "qq", "phone", "url", "domain",
-            "bank_card", "alipay", "telegram", "email", "crypto_wallet", "slang", "tool",
+            "bank_card", "alipay", "email", "crypto_wallet", "slang", "tool",
         }
         skip_llm = (
             len(high_value_hit) >= 2

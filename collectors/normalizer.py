@@ -242,6 +242,87 @@ def normalize_douyin(item: Any) -> IntelItem:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Xianyu (闲鱼) Normalizer
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def normalize_xianyu(item: Any) -> IntelItem:
+    """将 ParsedXianyuItem 转换为 IntelItem。
+
+    闲鱼特有字段映射:
+      - price → IntelItem.price
+      - seller_rating → IntelItem.seller_rating
+      - location → IntelItem.location
+      - listing_status → IntelItem.listing_status
+    """
+    meta = getattr(item, "metadata", {}) or {}
+    image_list = list(getattr(item, "image_list", []) or [])
+
+    return IntelItem(
+        platform="xianyu",
+        content_raw=getattr(item, "content_raw", ""),
+        source_url=getattr(item, "source_url", ""),
+        author_uid=getattr(item, "author_uid", ""),
+        author_username=getattr(item, "author_username", ""),
+        post_id=getattr(item, "item_id", ""),
+        group_id=getattr(item, "keyword", ""),
+        content_type=getattr(item, "content_type", "text"),
+        collected_at=getattr(item, "collected_at", datetime.utcnow()),
+        like_count=getattr(item, "like_count", 0),
+        comment_count=getattr(item, "comment_count", 0),
+        price=getattr(item, "price", 0.0),
+        seller_rating=getattr(item, "seller_rating", ""),
+        location=getattr(item, "location", ""),
+        listing_status=getattr(item, "listing_status", "active"),
+        image_urls=image_list,
+        tags=[],
+        metadata={
+            "item_id": getattr(item, "item_id", ""),
+            "price": getattr(item, "price", 0.0),
+            "location": getattr(item, "location", ""),
+            "seller_rating": getattr(item, "seller_rating", ""),
+            "listing_status": getattr(item, "listing_status", "active"),
+            "keyword": getattr(item, "keyword", ""),
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IM → IntelItem (QQ群聊等社交平台)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def im_to_intel(im: Any) -> IntelItem:
+    """将 IMMessageItem（即时消息）转换为 IntelItem 用于统一存储。
+
+    QQ群聊消息与帖子/评论结构不同：
+      - group_id → IntelItem.group_id（群号）
+      - sender_uid → IntelItem.author_uid
+      - content_raw 保持不变
+      - source_url 构造成 qq:// 协议
+    """
+    return IntelItem(
+        platform=getattr(im, "platform", "qq_group"),
+        content_raw=getattr(im, "content_raw", ""),
+        author_uid=getattr(im, "sender_uid", ""),
+        author_username=getattr(im, "sender_nickname", ""),
+        group_id=getattr(im, "group_id", ""),
+        content_type=getattr(im, "content_type", "text"),
+        source_url=f"qq://group/{getattr(im, 'group_id', '')}/msg/{getattr(im, 'message_id', '')}",
+        message_id=int(getattr(im, "message_id", "0")) if getattr(im, "message_id", "").isdigit() else None,
+        image_urls=getattr(im, "image_urls", []) or [],
+        collected_at=getattr(im, "collected_at", datetime.utcnow()),
+        metadata={
+            "group_id": getattr(im, "group_id", ""),
+            "group_name": getattr(im, "group_name", ""),
+            "sender_uid": getattr(im, "sender_uid", ""),
+            "sender_nickname": getattr(im, "sender_nickname", ""),
+            "message_id": getattr(im, "message_id", ""),
+            "reply_to_id": getattr(im, "reply_to_id", ""),
+            "is_im": True,
+        },
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 统一入口
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -251,6 +332,8 @@ NORMALIZERS = {
     "tieba": normalize_tieba,
     "xiaohongshu": normalize_xiaohongshu,
     "douyin": normalize_douyin,
+    "xianyu": normalize_xianyu,
+    "qq_group": im_to_intel,
 }
 
 

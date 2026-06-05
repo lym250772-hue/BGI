@@ -62,7 +62,7 @@ def show():
     b1.metric("当前结果", len(rows))
     b2.metric("可提交", len(eligible))
     with b3:
-        if st.button("提交当前筛选到后台队列", type="primary", disabled=not eligible, width="stretch"):
+        if st.button("提交当前筛选到后台队列", type="primary", disabled=not eligible, use_container_width=True):
             job_ids = data.submit_batch_jobs(
                 eligible,
                 options={"enable_llm": True, "enable_graph_expand": False, "enable_report": False, "analysis_mode": "批量标准研判"},
@@ -78,7 +78,7 @@ def show():
     st.dataframe(
         _table(rows),
         hide_index=True,
-        width="stretch",
+        use_container_width=True,
         column_config={
             "情报ID": st.column_config.NumberColumn(width="small"),
             "内容摘要": st.column_config.TextColumn(width="large"),

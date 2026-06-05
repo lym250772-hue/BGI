@@ -99,7 +99,7 @@ def _render_result(raw_id: int):
                 }
                 for e in entities
             ])
-            st.dataframe(df, hide_index=True, width="stretch")
+            st.dataframe(df, hide_index=True, use_container_width=True)
         else:
             st.info("暂无实体。")
 
@@ -144,7 +144,7 @@ def _jobs_table():
         }
         for r in rows
     ])
-    st.dataframe(df, hide_index=True, width="stretch")
+    st.dataframe(df, hide_index=True, use_container_width=True)
 
 
 def show():
@@ -196,7 +196,7 @@ def show():
         st.markdown("<div class='bagi-panel'>", unsafe_allow_html=True)
         st.markdown("<div class='section-title'>提交后台研判</div>", unsafe_allow_html=True)
         st.caption("不会阻塞页面。提交后可以继续切换其他情报。")
-        if st.button("提交研判任务", type="primary", width="stretch", key="submit_job"):
+        if st.button("提交研判任务", type="primary", use_container_width=True, key="submit_job"):
             text = data.preferred_text(raw_id, fallback=selected.get("content_raw") or "")
             job_id = data.submit_analysis_job(
                 raw_id=raw_id,

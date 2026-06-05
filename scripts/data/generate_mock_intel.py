@@ -30,7 +30,7 @@ _PLATFORM_CONFIG = {
         "username_pool": ["乔yo-", "今夜不设防", "一只小废柴", "锦鲤大王V", "吃瓜少女小圆", "科技数码君",
                           "兼职指南", "薅羊毛小能手", "快钱有道", "日赚500不是梦", "诚信出号", "数据圈内人"],
     },
-    "telegram": {
+    : {
         "url_template": "https://t.me/{group_id}/{message_id}",
         "uid_range": (100000000, 999999999),
         "weibo_id_format": None,
@@ -58,8 +58,7 @@ _TEMPLATES = [
     # === 诈骗 ===
     {
         "content_raw": "最新刷单返利项目，日赚500+，无需押金。加微信 shuadan666 了解详情，名额有限！链接：https://shuadan-hui.com/join?ref=abc123",
-        "platform": "telegram",
-        "group_id": "刷单返利",
+        "platform": "group_id": "刷单返利",
         "has_image": False,
     },
     {
@@ -70,8 +69,7 @@ _TEMPLATES = [
     },
     {
         "content_raw": "内部股票消息，跟单稳赚。免费推荐牛股，加群 99651234 领取每日金股。直播间 https://niugu-live.com/room/888",
-        "platform": "telegram",
-        "group_id": "股票交流",
+        "platform": "group_id": "股票交流",
         "has_image": False,
     },
     {
@@ -83,8 +81,7 @@ _TEMPLATES = [
     # === 引流 ===
     {
         "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 douyin_pro888。工具下载 https://linktr.ee/douyin_pro",
-        "platform": "telegram",
-        "group_id": "直播技术",
+        "platform": "group_id": "直播技术",
         "has_image": False,
     },
     {
@@ -101,21 +98,18 @@ _TEMPLATES = [
     },
     {
         "content_raw": "菠菜平台推广，真人视讯百家乐，高返水。代理咨询TG：bocai_agent888",
-        "platform": "telegram",
-        "group_id": "博彩推广",
+        "platform": "group_id": "博彩推广",
         "has_image": True,
     },
     # === 作弊 ===
     {
         "content_raw": "抖音直播间挂铁，真人互动，在线人数瞬间破千。软件下载：https://douyin-bot.pro/download，客服QQ：55321987",
-        "platform": "telegram",
-        "group_id": "直播辅助",
+        "platform": "group_id": "直播辅助",
         "has_image": False,
     },
     {
         "content_raw": "薅羊毛自动化脚本，支持淘宝/京东/拼多多全平台。支持定制规则，联系 wx_pro_155",
-        "platform": "telegram",
-        "group_id": "羊毛线报",
+        "platform": "group_id": "羊毛线报",
         "has_image": False,
     },
     {
@@ -133,14 +127,12 @@ _TEMPLATES = [
     # === 账号黑产 ===
     {
         "content_raw": "出售微信号/QQ号/抖音号，实名已过，可换绑手机。大量现货，价格美丽。联系 wx_pro_101",
-        "platform": "telegram",
-        "group_id": "账号交易",
+        "platform": "group_id": "账号交易",
         "has_image": False,
     },
     {
         "content_raw": "接码平台，支持国内+海外，一码一用，价格低至0.1元。注册地址：https://jiema.pro/register?invite=abc",
-        "platform": "telegram",
-        "group_id": "接码平台",
+        "platform": "group_id": "接码平台",
         "has_image": False,
     },
     {
@@ -151,8 +143,7 @@ _TEMPLATES = [
     },
     {
         "content_raw": "批量注册抖音/快手账号，日出千号，支持API对接。联系wx_pro_188 获取测试额度",
-        "platform": "telegram",
-        "group_id": "批量注册",
+        "platform": "group_id": "批量注册",
         "has_image": False,
     },
     # === 内容违规 ===
@@ -164,8 +155,7 @@ _TEMPLATES = [
     },
     {
         "content_raw": "政治敏感内容代发，覆盖全网平台，按条计费。渠道稳定，联系TG：political_sender",
-        "platform": "telegram",
-        "group_id": "代发推广",
+        "platform": "group_id": "代发推广",
         "has_image": False,
     },
     {
@@ -177,14 +167,12 @@ _TEMPLATES = [
     # === 工具交易 ===
     {
         "content_raw": "出售Web漏洞扫描器/脱库工具/SQL注入工具包。支持担保交易。下载地址 https://hacktoolz.org/dl/scanner_pro，联系QQ 33456789",
-        "platform": "telegram",
-        "group_id": "黑客工具",
+        "platform": "group_id": "黑客工具",
         "has_image": False,
     },
     {
         "content_raw": "IP代理池，支持HTTP/SOCKS5，每日更新10w+IP，可用于爬虫/注册/刷量。购买：https://proxy-pool.io/buy/10w-ips",
-        "platform": "telegram",
-        "group_id": "代理IP",
+        "platform": "group_id": "代理IP",
         "has_image": False,
     },
     {
@@ -196,8 +184,7 @@ _TEMPLATES = [
     # === 直播违规 ===
     {
         "content_raw": "抖音直播色情引流技术教学，规避平台审核。全套教程+话术，价格199。加微信 live_se_tech",
-        "platform": "telegram",
-        "group_id": "直播技术",
+        "platform": "group_id": "直播技术",
         "has_image": False,
     },
     {
@@ -208,15 +195,13 @@ _TEMPLATES = [
     },
     {
         "content_raw": "无人直播带货，AI数字人24小时不停播，月入10w+。设备+方案打包：https://ai-live.pro/package",
-        "platform": "telegram",
-        "group_id": "无人直播",
+        "platform": "group_id": "无人直播",
         "has_image": True,
     },
     # === 数据泄露 ===
     {
         "content_raw": "出快递数据/电商订单/车主信息，一手货源，可测试。联系TG：data_broker_2025",
-        "platform": "telegram",
-        "group_id": "数据买卖",
+        "platform": "group_id": "数据买卖",
         "has_image": False,
     },
     {
@@ -227,15 +212,13 @@ _TEMPLATES = [
     },
     {
         "content_raw": "2025最新银行客户数据，含姓名/手机/身份证/卡号。100万条起售，验证通过率90%+。联系@bankdata_seller",
-        "platform": "telegram",
-        "group_id": "数据买卖",
+        "platform": "group_id": "数据买卖",
         "has_image": False,
     },
     # === 信贷欺诈 (新增) ===
     {
         "content_raw": "AB贷操作，白户纯白，无视征信。下款后55分。加微信 ab_loan_master",
-        "platform": "telegram",
-        "group_id": "贷款中介",
+        "platform": "group_id": "贷款中介",
         "has_image": False,
     },
     {
@@ -249,8 +232,7 @@ _TEMPLATES = [
         "platform": "weibo",
         "group_id": "征信修复",
         "has_image": False,
-    },
-]
+    }]
 
 
 def _generate_item(template: dict, base_time: datetime) -> dict:
@@ -273,7 +255,7 @@ def _generate_item(template: dict, base_time: datetime) -> dict:
     msg_id = str(random.randint(10000000, 99999999))
     if platform == "weibo":
         source_url = cfg["url_template"].format(uid=uid, weibo_id=weibo_id)
-    elif platform == "telegram":
+    elif platform == :
         source_url = cfg["url_template"].format(group_id=template["group_id"], message_id=msg_id)
     elif platform == "tieba":
         source_url = cfg["url_template"].format(message_id=msg_id)
@@ -294,7 +276,7 @@ def _generate_item(template: dict, base_time: datetime) -> dict:
     }
     if platform == "weibo" and weibo_id:
         metadata["weibo_id"] = weibo_id
-    if platform == "telegram":
+    if platform == :
         metadata["message_id"] = int(msg_id)
     if platform == "forum":
         metadata["thread_id"] = int(msg_id)

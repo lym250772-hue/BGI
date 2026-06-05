@@ -12,7 +12,7 @@ Usage:
     python scripts/demo/demo_one.py --json sample.json
 
     # Demo with JSON from stdin
-    echo '{"platform":"telegram","content_raw":"..."}' | python scripts/demo/demo_one.py --stdin
+    echo '{"platform":"content_raw":"..."}' | python scripts/demo/demo_one.py --stdin
 
 This is the "key moment" script for presentations:
     输入一条情报 JSON → 一键研判 → 展示完整结果
@@ -33,8 +33,7 @@ from loguru import logger
 # Built-in demo samples
 DEMO_SAMPLES = {
     "live_stream": {
-        "platform": "telegram",
-        "content_raw": (
+        "platform": "content_raw": (
             "抖音无人直播技术，全套教程+工具，包教包会。"
             "详情看主页，联系微信 douyin_pro888。"
             "工具下载 https://linktr.ee/douyin_pro"
@@ -145,8 +144,7 @@ def run_demo(
     sample_name: str = "live_stream",
     stdin: bool = False,
     enable_graph: bool = True,
-    enable_report: bool = True,
-):
+    enable_report: bool = True):
     """Run the full analysis pipeline and pretty-print results."""
 
     # ── 1. Resolve input source ──────────────────────────────────────────
@@ -185,7 +183,7 @@ def run_demo(
         items = mysql.list_raw(limit=1)
         # Find the specific raw_id
         with mysql.cursor() as c:
-            c.execute("SELECT * FROM ods_raw_intel WHERE id=%s", (raw_id,))
+            c.execute("SELECT * FROM ods_raw_intel WHERE id=%s", (raw_id))
             item = c.fetchone()
         if not item:
             print(f"  [错误] raw_id={raw_id} 不存在")
@@ -231,8 +229,7 @@ def run_demo(
         text=text,
         platform=platform,
         enable_graph_expand=enable_graph,
-        enable_report=enable_report,
-    )
+        enable_report=enable_report)
 
     # ── 4. Display results ───────────────────────────────────────────────
     print(f"\n{DIVIDER}")
@@ -309,8 +306,7 @@ def main():
         sample_name=args.sample,
         stdin=args.stdin,
         enable_graph=not args.no_graph,
-        enable_report=not args.no_report,
-    )
+        enable_report=not args.no_report)
 
 
 if __name__ == "__main__":

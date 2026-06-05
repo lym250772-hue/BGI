@@ -186,8 +186,7 @@ class ReportAgent:
                 model=settings.llm_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=1500,
-            )
+                max_tokens=1500)
             enhanced = json.loads(resp.choices[0].message.content)
             enhanced["generated_by"] = "report_agent_llm"
             enhanced["generated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
@@ -210,38 +209,30 @@ class ReportAgent:
         risk_advice_map = {
             "直播违规": [
                 {"action": "关键词监控", "detail": f"将相关关键词加入直播平台风险词库", "priority": "high"},
-                {"action": "账号监控", "detail": "对涉及账号进行持续行为监控", "priority": "high"},
-            ],
+                {"action": "账号监控", "detail": "对涉及账号进行持续行为监控", "priority": "high"}],
             "诈骗": [
                 {"action": "诈骗模型更新", "detail": "将该样本加入诈骗识别模型训练集", "priority": "high"},
-                {"action": "资金链路追踪", "detail": "对涉及银行账号/支付账号进行关联排查", "priority": "critical"},
-            ],
+                {"action": "资金链路追踪", "detail": "对涉及银行账号/支付账号进行关联排查", "priority": "critical"}],
             "引流": [
                 {"action": "渠道封堵", "detail": "对引流微信/QQ号进行标记和举报", "priority": "high"},
-                {"action": "域名监控", "detail": "将引流域名加入黑名单", "priority": "medium"},
-            ],
+                {"action": "域名监控", "detail": "将引流域名加入黑名单", "priority": "medium"}],
             "作弊": [
                 {"action": "行为特征入库", "detail": "提取作弊行为特征，更新风控规则", "priority": "high"},
-                {"action": "设备指纹", "detail": "关联作弊工具的设备指纹信息", "priority": "medium"},
-            ],
+                {"action": "设备指纹", "detail": "关联作弊工具的设备指纹信息", "priority": "medium"}],
             "账号黑产": [
                 {"action": "批量账号识别", "detail": "对同批次注册账号进行回溯排查", "priority": "critical"},
-                {"action": "实名验证加强", "detail": "针对可疑注册模式加强实名验证", "priority": "high"},
-            ],
+                {"action": "实名验证加强", "detail": "针对可疑注册模式加强实名验证", "priority": "high"}],
             "工具交易": [
                 {"action": "工具溯源", "detail": "对交易工具进行技术分析和特征提取", "priority": "high"},
-                {"action": "卖家追踪", "detail": "通过支付信息追踪工具卖家", "priority": "medium"},
-            ],
+                {"action": "卖家追踪", "detail": "通过支付信息追踪工具卖家", "priority": "medium"}],
             "内容违规": [
                 {"action": "内容清除", "detail": "对违规内容进行下架处理", "priority": "high"},
-                {"action": "发布者处置", "detail": "对发布者账号进行警告或封禁", "priority": "medium"},
-            ],
+                {"action": "发布者处置", "detail": "对发布者账号进行警告或封禁", "priority": "medium"}],
         }
 
         default_advice = [
             {"action": "持续监控", "detail": "将该情报涉及的实体加入监控清单", "priority": "medium"},
-            {"action": "样本积累", "detail": "将该情报作为训练样本积累", "priority": "low"},
-        ]
+            {"action": "样本积累", "detail": "将该情报作为训练样本积累", "priority": "low"}]
 
         advice.extend(risk_advice_map.get(risk_label, default_advice))
 
@@ -296,7 +287,7 @@ class ReportAgent:
             ],
             "evidence_count": len(facts.get("evidence", [])),
             "has_contact_entity": any(
-                e.get("type") in ("wechat", "qq", "phone", "telegram")
+                e.get("type") in ("wechat", "qq", "phone")
                 for e in facts.get("entities", [])
             ),
             "has_url": any(

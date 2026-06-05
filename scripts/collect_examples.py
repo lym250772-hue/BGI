@@ -67,6 +67,11 @@ PLATFORM_CONFIG = {
         "keyword": "无人直播",
         "max_pages": 2,
     },
+    "xianyu": {
+        "spider": "playwright_v3",
+        "keyword": "刷单",
+        "max_pages": 2,
+    },
 }
 
 
@@ -175,6 +180,35 @@ def collect_playwright(platform: str, keyword: str, max_pages: int) -> list:
     return all_items
 
 
+def collect_xianyu(keywords: list, max_pages: int, cookie_file: str = None) -> list:
+    """Collect from Xianyu (v3 persistent browser, MUST be visible).
+    Uses a single persistent browser session for ALL keywords.
+    Returns list of (keyword, [ParsedXianyuItem]) tuples.
+    """
+    from collectors.spiders.xianyu_spider import XianyuSearchSpider
+
+    spider = XianyuSearchSpider(headless=False)
+    all_items = []
+    try:
+        spider.start()  # 仅启动一次浏览器
+        for kw in keywords:
+            logger.info("[xianyu] Searching: {} (max_pages={})", kw, max_pages)
+            try:
+                items = spider.search_and_parse(kw, max_pages=max_pages)
+                all_items.append((kw, items))
+                logger.info("[xianyu] {}: {} items", kw, len(items))
+            except Exception as exc:
+                logger.error("[xianyu] {}: Collection failed: {}", kw, exc)
+    except Exception as exc:
+        logger.error("[xianyu] Fatal: {}", exc)
+    finally:
+        try:
+            spider.close()  # 所有关键词采集完后才关闭
+        except Exception:
+            pass
+    return all_items
+
+
 def main():
     parser = argparse.ArgumentParser(description="Collect real sample data for examples/")
     parser.add_argument("--max-pages", type=int, default=2,
@@ -221,7 +255,7 @@ def main():
             continue
 
         # Check cookies for playwright-based platforms
-        if config["spider"] == "playwright":
+        if config["spider"] in ("playwright", "playwright_v3"):
             from collectors.spiders.base_spider import BaseSpider
             cookies = BaseSpider.load_cookies(platform)
             if not cookies:
@@ -237,6 +271,14 @@ def main():
                 items = collect_tieba(kw, args.max_pages)
             elif platform == "zhihu":
                 items = collect_zhihu_http(kw, args.max_pages)
+            elif platform == "xianyu":
+                # Xianyu uses a single persistent browser session for all keywords
+                results = collect_xianyu(kw_list, args.max_pages)
+                for kw, items in results:
+                    all_items.extend(items)
+                    if items:
+                        time.sleep(2)  # Gentle delay between keywords
+                break  # Already processed all keywords in one call
             elif config["spider"] == "http":
                 items = collect_weibo(kw, args.max_pages)
             else:

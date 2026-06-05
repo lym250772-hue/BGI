@@ -24,8 +24,19 @@ env/
 # Data (generated/collected)
 data/raw/
 data/cleaned/
-data/models/*.pt
-data/models/*.bin
+data/modeling/
+data/models/**
+data/images/
+data/browser_profiles/
+model_release/
+tmp/
+*.zip
+*.part*
+*.safetensors
+*.pt
+*.pth
+*.bin
+checkpoint-*/
 
 # Docker volumes
 docker/volumes/
@@ -43,4 +54,6 @@ logs/
 
 # Claude Code
 .claude/
-data/browser_profiles/
+
+# NapCatQQ (QQ群采集桥接)
+NapCatQQ/

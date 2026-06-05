@@ -25,7 +25,7 @@ RISK_THRESHOLDS = {
 HIGH_RISK_LABELS = {"诈骗", "账号黑产"}
 
 # Entity types that carry extra risk
-CONTACT_ENTITY_TYPES = {"wechat", "qq", "phone", "telegram"}
+CONTACT_ENTITY_TYPES = {"wechat", "qq", "phone", }
 LINK_ENTITY_TYPES = {"url", "domain", "ip"}
 TOOL_ENTITY_TYPES = {"tool"}
 FINANCIAL_ENTITY_TYPES = {"bank_card", "alipay"}

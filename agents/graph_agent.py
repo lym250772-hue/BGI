@@ -78,23 +78,19 @@ class GraphAgent:
             elif "Account" in str(labels):
                 related_accounts.add((
                     node_data.get("type", ""),
-                    node_data.get("value", ""),
-                ))
+                    node_data.get("value", "")))
             elif "Contact" in str(labels):
                 related_contacts.add((
                     node_data.get("type", ""),
-                    node_data.get("value", ""),
-                ))
+                    node_data.get("value", "")))
             elif "Link" in str(labels):
                 related_links.add((
                     node_data.get("type", ""),
-                    node_data.get("value", ""),
-                ))
+                    node_data.get("value", "")))
             elif "Tool" in str(labels):
                 related_tools.add((
                     node_data.get("type", ""),
-                    node_data.get("value", ""),
-                ))
+                    node_data.get("value", "")))
 
         return {
             "entity": {"type": entity_type, "value": entity_value},
@@ -154,7 +150,7 @@ class GraphAgent:
             evalue = ent.get("entity_value", "")
 
             # Only expand contacts and accounts (not features, slang)
-            if etype_str in ("wechat", "qq", "telegram", "phone", "url", "domain",
+            if etype_str in ("wechat", "qq", "phone", "url", "domain",
                              "bank_card", "alipay", "tool", "crypto_wallet"):
                 expansion = self.expand_entity(etype_str, evalue, depth=2)
                 expansions.append(expansion)

@@ -1,11 +1,13 @@
 """Multi-platform concurrent collection orchestrator.
 
-Manages concurrent data collection across all 6 platforms with:
+Manages concurrent data collection across all platforms with:
 - One thread per platform (parallel keyword search)
 - Token-bucket rate limiting (per-platform)
 - Progress tracking and periodic reporting
 - Checkpoint resume integration (using existing BaseSpider checkpoint infra)
 - Graceful shutdown on SIGINT (Ctrl+C)
+
+(Telegram/Telethon 已于 2026-06-04 移除)
 """
 
 from __future__ import annotations
@@ -23,9 +25,8 @@ from config.settings import settings
 
 
 class SpiderType(Enum):
-    PLAYWRIGHT = "playwright"   # Browser-based: tieba, zhihu, douyin, xiaohongshu
+    PLAYWRIGHT = "playwright"   # Browser-based: tieba, zhihu, douyin, xiaohongshu, xianyu
     HTTP = "http"               # Pure requests: weibo
-    TELETHON = "telethon"       # Telethon client: telegram
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -45,7 +46,7 @@ class PlatformTask:
     headless: bool = True
     resume_from_checkpoint: bool = True
     requests_per_minute: int = 20
-    tg_groups: list[str] = field(default_factory=list)
+    pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -125,8 +126,7 @@ class ProgressTracker:
                 "total_items": self._total_items,
                 "total_errors": self._total_errors,
                 "items_per_sec": round(
-                    self._total_items / elapsed if elapsed > 0 else 0, 2,
-                ),
+                    self._total_items / elapsed if elapsed > 0 else 0, 2),
                 "platforms": {
                     k: dict(v) for k, v in self.platforms.items()
                 },
@@ -169,9 +169,8 @@ class CollectionOrchestrator:
         threads: list[threading.Thread] = []
         for task in self.tasks:
             t = threading.Thread(
-                target=self._run_platform, args=(task,),
-                name=f"collect-{task.platform}", daemon=True,
-            )
+                target=self._run_platform, args=(task),
+                name=f"collect-{task.platform}", daemon=True)
             t.start()
             threads.append(t)
 
@@ -218,8 +217,7 @@ class CollectionOrchestrator:
                 "[Collector] {} items | {:.1f}/s | {}",
                 snap["total_items"],
                 snap["items_per_sec"],
-                " | ".join(parts),
-            )
+                " | ".join(parts))
 
     # ── platform dispatch ────────────────────────────────────────────────
 
@@ -230,8 +228,6 @@ class CollectionOrchestrator:
                 self._run_playwright(task)
             elif task.spider_type == SpiderType.HTTP:
                 self._run_http(task)
-            elif task.spider_type == SpiderType.TELETHON:
-                self._run_telethon(task)
             else:
                 logger.error("[{}] Unknown spider type", task.platform)
             self.progress.update(task.platform, status="completed")
@@ -265,8 +261,7 @@ class CollectionOrchestrator:
                         logger.info(
                             "[{}] Resuming [{}] from page {} (had {} items)",
                             task.platform, kw, start_page,
-                            ck.get("collected_total", 0),
-                        )
+                            ck.get("collected_total", 0))
 
                 # Rate-limit keyword start
                 limiter.acquire()
@@ -277,8 +272,7 @@ class CollectionOrchestrator:
                     max_items=task.max_items,
                     incremental=task.incremental,
                     start_page=start_page,
-                    checkpoint_callback=spider._update_checkpoint,
-                )
+                    checkpoint_callback=spider._update_checkpoint)
 
                 for parsed in items:
                     if self._shutdown.is_set():
@@ -337,8 +331,7 @@ class CollectionOrchestrator:
                                     break
                                 self._write.enqueue(_comment_to_dict(
                                     c, "weibo", parent_id=p.weibo_id,
-                                    keyword=kw, parent_url=p.source_url,
-                                ))
+                                    keyword=kw, parent_url=p.source_url))
                                 self.progress.update(task.platform, items_delta=1)
                         except Exception:
                             pass
@@ -354,8 +347,7 @@ class CollectionOrchestrator:
 
         spider = ZhihuAPISpider(
             fetch_answers=task.fetch_replies,
-            fetch_comments=task.fetch_replies,
-        )
+            fetch_comments=task.fetch_replies)
         limiter = self._rate_limiters[task.platform]
         try:
             for kw in task.keywords:
@@ -380,28 +372,6 @@ class CollectionOrchestrator:
         # Fallback to Playwright Xiaohongshu spider for now
         # (pure-HTTP version requires X-s/X-t signing)
         self._run_playwright(task)
-
-    # ── Telethon path (telegram) ─────────────────────────────────────────
-
-    def _run_telethon(self, task: PlatformTask) -> None:
-        from collectors.telegram_collector import TelegramCollector
-
-        groups = task.tg_groups if task.tg_groups else task.keywords
-        if not groups:
-            logger.warning("[telegram] No group usernames specified; skipping")
-            self.progress.update(task.platform, status="skipped(no groups)")
-            return
-
-        collector = TelegramCollector(group_usernames=groups)
-        try:
-            for item in collector.collect():
-                if self._shutdown.is_set():
-                    break
-                self._write.enqueue(_intel_item_to_dict(item))
-                self.progress.update("telegram", items_delta=1)
-        except Exception as exc:
-            logger.error("[telegram] {}", exc)
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers — item-to-dict conversion
@@ -431,8 +401,7 @@ def _parsed_to_dict(parsed, platform: str) -> dict:
         "crawl_batch_id": "",
         "metadata": _json.dumps(
             _build_metadata(parsed, platform),
-            ensure_ascii=False, default=str,
-        ),
+            ensure_ascii=False, default=str),
     }
 
 
@@ -546,10 +515,6 @@ def _comment_to_dict(comment: dict, platform: str, *,
     }
 
 
-def _intel_item_to_dict(item) -> dict:
-    """Convert an IntelItem (from TelegramCollector) to INSERT dict."""
-    return _parsed_to_dict(item, item.platform)
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Spider factory
@@ -572,6 +537,9 @@ def _make_playwright_spider(task: PlatformTask):
     elif p == "xiaohongshu":
         from collectors.spiders.xiaohongshu_spider import XiaohongshuSearchSpider
         return XiaohongshuSearchSpider(headless=task.headless)
+    elif p == "xianyu":
+        from collectors.spiders.xianyu_spider import XianyuSearchSpider
+        return XianyuSearchSpider(headless=False)  # 闲鱼强制非headless
     else:
         logger.error("Unknown Playwright platform: {}", p)
         return None

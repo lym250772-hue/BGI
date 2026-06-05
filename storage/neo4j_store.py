@@ -18,7 +18,7 @@ _TYPE_TO_LABEL = {
     "wechat":        "Account",
     "qq":            "Account",
     "alipay":        "Account",
-    "telegram":      "Account",
+    :      "Account",
     "phone":         "Contact",
     "email":         "Contact",
     "bank_card":     "Contact",
@@ -35,7 +35,7 @@ _TYPE_TO_REL = {
     "wechat":        "USES_ACCOUNT",
     "qq":            "USES_ACCOUNT",
     "alipay":        "USES_ACCOUNT",
-    "telegram":      "USES_ACCOUNT",
+    :      "USES_ACCOUNT",
     "phone":         "USES_CONTACT",
     "email":         "USES_CONTACT",
     "bank_card":     "USES_CONTACT",
@@ -54,8 +54,7 @@ class Neo4jStore:
     def __init__(self):
         self.driver = GraphDatabase.driver(
             settings.neo4j_uri,
-            auth=(settings.neo4j_user, settings.neo4j_password),
-        )
+            auth=(settings.neo4j_user, settings.neo4j_password))
 
     def close(self):
         self.driver.close()
@@ -82,8 +81,7 @@ class Neo4jStore:
             "CREATE INDEX IF NOT EXISTS FOR (a:Account) ON (a.type)",
             "CREATE INDEX IF NOT EXISTS FOR (c:Contact) ON (c.type)",
             "CREATE INDEX IF NOT EXISTS FOR (l:Link) ON (l.type)",
-            "CREATE INDEX IF NOT EXISTS FOR (s:Slang) ON (s.type)",
-        ]
+            "CREATE INDEX IF NOT EXISTS FOR (s:Slang) ON (s.type)"]
         with self.driver.session() as sess:
             for q in queries:
                 try:
@@ -211,8 +209,7 @@ class Neo4jStore:
                 SET e.type = $type, e.uuid = $uuid
                 """,
                 value=value, type=entity_type,
-                uuid=f"{entity_type}:{value}",
-            )
+                uuid=f"{entity_type}:{value}")
             # Also maintain legacy Entity node for backward compat
             sess.run(
                 """
@@ -220,8 +217,7 @@ class Neo4jStore:
                 SET e.type = $type, e.value = $value
                 """,
                 uuid=f"{entity_type}:{value}",
-                type=entity_type, value=value,
-            )
+                type=entity_type, value=value)
 
     def link_entity_to_intel_refined(self, entity_type: str, value: str,
                                      raw_data_id: int):
@@ -235,8 +231,7 @@ class Neo4jStore:
                 MATCH (e:{label} {{value: $value}})
                 MERGE (i)-[:{rel}]->(e)
                 """,
-                raw_id=raw_data_id, value=value,
-            )
+                raw_id=raw_data_id, value=value)
             # Also maintain legacy EXTRACTED_FROM for backward compat
             sess.run(
                 """
@@ -245,8 +240,7 @@ class Neo4jStore:
                 MERGE (e)-[:EXTRACTED_FROM]->(i)
                 """,
                 raw_id=raw_data_id,
-                uuid=f"{entity_type}:{value}",
-            )
+                uuid=f"{entity_type}:{value}")
 
     def link_co_occurrence_refined(self, type_a: str, val_a: str,
                                    type_b: str, val_b: str, raw_data_id: int):
@@ -260,8 +254,7 @@ class Neo4jStore:
                 MATCH (b:{label_b} {{value: $val_b}})
                 MERGE (a)-[:CO_OCCURS {{raw_id: $raw_id}}]->(b)
                 """,
-                val_a=val_a, val_b=val_b, raw_id=raw_data_id,
-            )
+                val_a=val_a, val_b=val_b, raw_id=raw_data_id)
 
     def discover_gangs(self):
         """Find Accounts sharing the same Contact → create CO_OCCURS edges.
@@ -314,8 +307,7 @@ class Neo4jStore:
                     RETURN i, r, e, labels(e) AS elabels
                     LIMIT $limit
                     """,
-                    q=search, limit=limit,
-                )
+                    q=search, limit=limit)
             else:
                 result = sess.run(
                     """
@@ -324,8 +316,7 @@ class Neo4jStore:
                     RETURN i, r, e, labels(e) AS elabels
                     LIMIT $limit
                     """,
-                    limit=limit,
-                )
+                    limit=limit)
 
             for rec in result:
                 i = rec["i"]

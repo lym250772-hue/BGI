@@ -11,12 +11,13 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class Platform(str, Enum):
-    TELEGRAM = "telegram"
-    TIEBA = "tieba"
     WEIBO = "weibo"
+    TIEBA = "tieba"
     ZHIHU = "zhihu"
     XIAOHONGSHU = "xiaohongshu"
     DOUYIN = "douyin"
+    XIANYU = "xianyu"
+    QQ_GROUP = "qq_group"
     FORUM = "forum"
     RSS = "rss"
     OTHER = "other"
@@ -54,15 +55,13 @@ class RawIntelStatus(str, Enum):
 
 RAW_PENDING_STATUSES = (
     RawIntelStatus.RAW_COLLECTED.value,
-    RawIntelStatus.CLEANED.value,
-)
+    RawIntelStatus.CLEANED.value)
 
 
 RAW_TERMINAL_STATUSES = (
     RawIntelStatus.ANALYZED.value,
     RawIntelStatus.FAILED.value,
-    RawIntelStatus.DISCARDED.value,
-)
+    RawIntelStatus.DISCARDED.value)
 
 
 class IntentLabel(str, Enum):
@@ -90,7 +89,7 @@ class EntityType(str, Enum):
     PHONE = "phone"
     WECHAT = "wechat"
     QQ = "qq"
-    TELEGRAM = "telegram"
+    TELEGRAM = "telegram"  # 实体类型：Telegram账号（不是平台采集器）
     EMAIL = "email"
     URL = "url"
     DOMAIN = "domain"
@@ -185,5 +184,4 @@ HIGH_RISK_KEYWORDS = [
     "假币", "伪基站", "撞库", "盗号", "猫池", "卡商",
     "代理IP", "VPN翻墙", "暗网", "数据买卖", "隐私泄露",
     "薅羊毛", "批量注册", "群控", "云手机", "模拟器",
-    "代收", "代付", "跑分", "四件套", "八件套",
-]
+    "代收", "代付", "跑分", "四件套", "八件套"]

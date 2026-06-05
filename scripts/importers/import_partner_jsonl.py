@@ -5,8 +5,7 @@ Partner delivers one JSON object per line (JSONL format), matching
 PROJECT_PLAN.md Section 1.1 schema:
 
     {
-      "platform": "telegram",
-      "content_raw": "...",
+      "platform": "content_raw": "...",
       "content_type": "text",
       "source_url": "...",
       "author_uid": "...",
@@ -53,14 +52,12 @@ def _is_duplicate(platform: str, source_url: str, message_id) -> bool:
                 """SELECT COUNT(*) as cnt FROM ods_raw_intel
                    WHERE source_platform=%s AND source_url=%s
                    AND JSON_EXTRACT(metadata, '$.message_id') = %s""",
-                (platform, source_url, str(message_id)),
-            )
+                (platform, source_url, str(message_id)))
         elif source_url:
             c.execute(
                 """SELECT COUNT(*) as cnt FROM ods_raw_intel
                    WHERE source_platform=%s AND source_url=%s""",
-                (platform, source_url),
-            )
+                (platform, source_url))
         else:
             return False
         row = c.fetchone()
@@ -96,8 +93,7 @@ def map_to_raw(item: dict) -> dict:
             {**(item.get("metadata") or {}),
              "group_id": item.get("group_id", ""),
              "message_id": item.get("message_id")},
-            ensure_ascii=False, default=str,
-        ),
+            ensure_ascii=False, default=str),
     }
 
 
@@ -112,8 +108,7 @@ def exists_in_db(item: dict) -> bool:
         if source_url:
             c.execute(
                 "SELECT id FROM ods_raw_intel WHERE source_platform=%s AND source_url=%s LIMIT 1",
-                (platform, source_url),
-            )
+                (platform, source_url))
             if c.fetchone():
                 return True
         if message_id:
@@ -122,8 +117,7 @@ def exists_in_db(item: dict) -> bool:
                    WHERE source_platform=%s
                      AND JSON_EXTRACT(metadata, '$.message_id') = %s
                    LIMIT 1""",
-                (platform, str(message_id)),
-            )
+                (platform, str(message_id)))
             if c.fetchone():
                 return True
     return False

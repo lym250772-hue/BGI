@@ -1,5 +1,90 @@
 # BGI 变更日志
 
+## 2026-06-04 (下午) — 品类扩展 v4.2: 闲鱼+QQ群+人物钓鱼+Telegram停用
+
+### 🆕 Feature 1: 闲鱼采集器（二手/众包平台）
+
+| 文件 | 说明 |
+|------|------|
+| `collectors/spiders/xianyu_spider.py` | v3持久化浏览器 + SSR+DOM双解析，阿里系强反爬对抗 |
+| `collectors/xianyu_collector.py` | BaseCollector 标准实现 |
+
+- v3持久化浏览器 (`launch_persistent_context` + Edge内核)
+- 三层数据获取: SSR (`__INITIAL_STATE__`) → DOM解析 → API拦截
+- 反爬: 非headless强制 + 高斯延迟5-16s + 贝塞尔鼠标 + 人类滚动
+- IntelItem 新增: `price`, `seller_rating`, `location`, `listing_status` 字段
+- CLI: `python main.py login-xianyu` / `python main.py collect -p xianyu -k "账号交易"`
+
+### 🆕 Feature 2: QQ群聊采集器（社交平台）
+
+| 文件 | 说明 |
+|------|------|
+| `bridges/napcat_bridge.py` | NapCatQQ WebSocket 客户端，实时接收群消息推送 |
+| `bridges/README.md` | NapCatQQ 安装配置文档 |
+| `collectors/qq_group_collector.py` | 被动群消息监听采集器 |
+
+- 架构: QQ桌面端(NTQQ) ←IPC→ NapCatQQ ←WebSocket→ napcat_bridge.py → QQGroupCollector
+- 新增 `IMMessageItem` 数据模型 (group_id/sender_uid/sender_nickname/message_id…)
+- `im_to_intel()` 转换器 → 统一 IntelItem 格式入库
+- CLI: `python main.py collect -p qq_group --qq-groups "群号" --duration 60`
+
+### 🆕 Feature 3: 钓鱼人物 Skill (Persona Engine)
+
+| 文件 | 说明 |
+|------|------|
+| `persona/engine.py` | 人物钓鱼主编排器 — LLM 驱动的多轮对话 |
+| `persona/safety.py` | **安全检查护栏** — 7层安全过滤, 法律合规核心 |
+| `persona/llm_driver.py` | DeepSeek LLM 对话生成 + 情报提取 |
+| `persona/conversation.py` | 对话状态管理 (init→active→completed/exited/safety_abort) |
+| `persona/collector.py` | BaseCollector 适配器 — 接入 clean→analyze 流水线 |
+| `persona/registry.py` | Persona Profile YAML 注册表 |
+| `persona/personas/ecommerce_buyer.yaml` | 人物1: 想买粉丝的电商卖家小张 |
+| `persona/personas/brusher_seeker.yaml` | 人物2: 想赚外快的大学生刷手小李 |
+| `persona/personas/account_unban.yaml` | 人物3: 需要解封账号的自媒体王姐 |
+
+- **安全护栏**: 触发词检查 + 正则模式匹配 + 外出内容过滤 + 退出条件 + 轮次上限 + 兜底消息
+- Phase 1: LLM-LLM模拟测试 (双方均为AI，不改动真实平台)
+- Phase 2 (后续): 连接真实平台 (闲鱼私聊/QQ群) 进行被动式情报收集
+- CLI: `python main.py persona list` / `python main.py persona run -p ecommerce_buyer -t "..."`
+
+### 🔧 BaseSpider 增强
+
+- 新增 `start_persistent()` — v3持久化浏览器启动 (一次登录永久复用)
+- 新增 `gauss_delay()` / `human_mouse()` / `human_scroll()` / `browse_homepage()` — 人类行为模拟工具集
+- 新增 `PERSISTENT_BROWSER` / `PERSISTENT_PROFILE_DIR` 类属性
+
+### 🗑️ Telegram 停用
+
+| 文件 | 操作 |
+|------|------|
+| `collectors/registry.py` | 移除 `_get_telegram_collector` + PLATFORM_MAP 条目 |
+| `collectors/orchestrator.py` | 移除 TELETHON 类型 + `_run_telethon()` + `_intel_item_to_dict()` |
+| `main.py` | 移除 `--tg-groups` 选项, 默认平台 `telegram` → `weibo` |
+| `.env.template` | 移除 TELEGRAM_API_ID / TELEGRAM_API_HASH |
+
+### 📊 当前平台总览
+
+| 平台 | 类型 | 帖子 | 评论 | 技术 |
+|------|:--:|:--:|:--:|------|
+| 微博 | 内容 | 1,768 | 2,461 | HTTP AJAX API |
+| 知乎 | 内容 | 1,607 | 10,326 | HTTP API |
+| 小红书 | 内容 | 2,556 | 2,986 | v3 持久化浏览器 |
+| 抖音 | 内容 | 1,167 | 1,267 | X-Bogus + v3 浏览器 |
+| 贴吧 | 内容 | 1,141 | 876 | HTTP JSON API |
+| **闲鱼** 🆕 | **二手/众包** | — | — | **v3 持久化浏览器** |
+| **QQ群** 🆕 | **社交IM** | — | — | **NapCatQQ WebSocket** |
+| **人物钓鱼** 🆕 | **主动收集** | — | — | **LLM (DeepSeek)** |
+| ~~Telegram~~ | ~~IM~~ | — | — | **已停用** |
+
+### ✅ 测试验证
+
+- 41/41 现有单元测试通过 (零回归)
+- list_platforms() → 8平台 (telegram已移除)
+- persona list → 3个人物正常加载
+- SafetyGuard: 7项安全检查全部通过
+
+---
+
 ## 2026-06-04 — 评论大规模采集完成 v4.1
 
 ### 📊 评论采集成果: 1830篇/17916条 (22%覆盖率)
