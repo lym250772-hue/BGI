@@ -35,7 +35,7 @@ def service_strip(compact: bool = True):
             )
     if not compact:
         with st.expander("连接明细", expanded=False):
-            st.dataframe(statuses, hide_index=True, width="stretch")
+            st.dataframe(statuses, hide_index=True, use_container_width=True)
 
 
 def risk_badge(level: str | None) -> str:

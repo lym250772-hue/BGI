@@ -107,6 +107,7 @@ def load_examples():
     }
     total = 0
     for p in platforms:
+        mysql.reconnect()  # 每平台强制重连，避免闲置超时
         f = PROJECT_ROOT / "examples" / f"{p}_sample.json"
         if not f.exists():
             print(f"  {p}: 文件不存在，跳过")

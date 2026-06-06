@@ -211,7 +211,7 @@ def daily_trend(days: int = 7) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 _PLATFORM_ALIASES = {
-    : ["tg", "飞机", "电报"],
+    "telegram": ["tg", "飞机", "电报"],
     "tieba": ["tieba", "贴吧"],
     "weibo": ["weibo", "微博"],
     "zhihu": ["zhihu", "知乎"],

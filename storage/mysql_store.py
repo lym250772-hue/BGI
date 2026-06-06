@@ -60,9 +60,9 @@ class MySQLStore:
                 password=settings.mysql_password,
                 database=settings.mysql_database,
                 charset="utf8mb4",
-                connect_timeout=2,
-                read_timeout=5,
-                write_timeout=5,
+                connect_timeout=15,
+                read_timeout=120,
+                write_timeout=60,
                 autocommit=False,
                 cursorclass=pymysql.cursors.DictCursor)
             self._local.conn = conn
@@ -82,6 +82,16 @@ class MySQLStore:
             raise
         finally:
             c.close()
+
+    def reconnect(self):
+        """强制断开并重新连接 MySQL（大量写入后使用）。"""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        self._local.conn = None
 
     # ------------------------------------------------------------------
     # Init — all 9 tables per PROJECT_PLAN.md 5.1
