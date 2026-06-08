@@ -22,7 +22,7 @@ BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析�
 | **数据采集** | **已实现** | **7品类打通: 内容平台(5)+二手/众包(闲鱼)+社交IM(QQ群)+人物钓鱼(Persona)，纯HTTP+Playwright+WebSocket多模式** |
 | 🆕 **主动情报 (Persona)** | **已实现** | **3个AI人物Profile，LLM驱动钓鱼对话，安全护栏保障合规，Phase 1: LLM模拟测试** |
 | 示例数据 | 已提供 | `examples/` 含 7 品类 10,248 条真实黑灰产样本（含评论/答案/图片） |
-| 结构化数据接入 | 已实现 | `scripts/importers/import_partner_jsonl.py` 支持队友 JSONL 导入、字段校验、去重入库 |
+| 结构化数据接入 | 已实现 | `scripts/importers/import_partner_jsonl.py` 支持 JSONL 导入、字段校验、去重入库 |
 | 清洗去重 | 已实现 | HTML 剥离、空白规范化、SimHash 去重、噪声过滤、高危关键词标记 |
 | 风险分类 | 已实现 | L1 规则优先，L2 RoBERTa 接口预留，L3 LLM 兜底，支持降级 |
 | 实体抽取 | 已实现 | 正则、黑话词典、Milvus 相似检索、LLM 结构化抽取四级级联 |
@@ -75,7 +75,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    S["RAW_COLLECTED\n队友数据已接收"] --> C["CLEANED\n文本清洗与去重完成"]
+    S["RAW_COLLECTED\n采集数据已入库"] --> C["CLEANED\n文本清洗与去重完成"]
     C --> Q["ANALYZING\n异步任务研判中"]
     Q --> A["ANALYZED\n研判成功"]
     Q --> F["FAILED\n研判失败，可重试"]
@@ -92,13 +92,14 @@ flowchart TD
 
 ## 5. 一条数据如何被处理
 
-队友交付示例：
+数据示例：
 
 ```json
 {
-  "platform": "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 example_001。工具下载 https://example.com/tools",
+  "platform": "zhihu",
+  "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 example_001。工具下载 https://example.com/tools",
   "content_type": "text",
-  "source_url": "https://t.me/example_group/10001",
+  "source_url": "https://www.zhihu.com/question/123456789",
   "author_uid": "10000001",
   "author_username": "外挂脚本",
   "group_id": "直播技术",
@@ -122,7 +123,7 @@ flowchart TD
 处理逻辑：
 
 1. 校验必填字段：`platform`、`content_raw`、`content_type`、`collected_at`。
-2. 将队友字段映射为系统字段，例如 `author_uid -> author_id`、`author_username -> author_name`。
+2. 将外部字段映射为系统字段，例如 `author_uid -> author_id`、`author_username -> author_name`。
 3. 按 `source_platform + source_url` 或 `message_id` 做幂等检查。
 4. 写入 MySQL `ods_raw_intel`，状态为 `RAW_COLLECTED`。
 
@@ -130,8 +131,9 @@ flowchart TD
 
 ```json
 {
-  "source_platform": "source_channel": "直播技术",
-  "source_url": "https://t.me/直播技术/10001",
+  "source_platform": "zhihu",
+  "source_channel": "直播技术",
+  "source_url": "https://www.zhihu.com/question/123456789",
   "author_id": "10000001",
   "author_name": "外挂脚本",
   "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 example_001。工具下载 https://example.com/tools",
@@ -383,7 +385,7 @@ MySQL 是系统主库。
 
 | 表 | 用途 |
 |---|---|
-| `ods_raw_intel` | 原始情报表，保存队友交付的结构化数据和处理状态 |
+| `ods_raw_intel` | 原始情报表，保存多源采集的结构化数据和处理状态 |
 | `dwd_clean_intel` | 清洗结果表，保存 clean_text、simhash、去重状态 |
 | `dwd_intel_analysis` | 研判结果表，保存风险分类、评分、证据、摘要 |
 | `dwd_entity` | 实体库，保存账号、链接、黑话、工具等 |
@@ -500,7 +502,7 @@ docker compose -f docker/docker-compose.yml --profile olap up -d
 python main.py init-db
 ```
 
-导入队友 JSONL：
+导入 JSONL 数据：
 
 ```bash
 python scripts/importers/import_partner_jsonl.py data/partner/demo.jsonl --status RAW_COLLECTED
@@ -618,7 +620,7 @@ BGI/
 
 推荐演示顺序：
 
-1. 在“情报池”展示队友导入的多平台情报，说明数据源已经统一进入 `RAW_COLLECTED`。
+1. 在”情报池”展示多平台情报，说明数据源已经统一进入 `RAW_COLLECTED`。
 2. 批量提交 10 到 20 条待研判情报，展示异步任务不会卡住页面。
 3. 在“研判工作台”打开一条典型黑话情报，展示风险分类、实体、证据、黑话归一、候选新黑话。
 4. 在“知识库”查看实体和候选黑话，说明系统具备数据飞轮和人工复核入口。
@@ -630,7 +632,7 @@ BGI/
 | 问题 | 影响 | 建议 |
 |---|---|---|
 | L2 小模型未必已训练完成 | 大量规则外样本会落到 LLM，速度和成本受影响 | 使用 4090 训练 RoBERTa/MacBERT，并把验证集 F1 写入答辩材料 |
-| OCR/ASR 不是当前主链路 | 图片、语音黑话无法完整覆盖 | 要求队友把 OCR/ASR 文本作为 `metadata.ocr_text/asr_text` 或单独字段交付 |
+| OCR/ASR 不是当前主链路 | 图片、语音黑话无法完整覆盖 | 后续可将 OCR/ASR 文本作为 `metadata.ocr_text/asr_text` 或单独字段交付 |
 | 候选黑话需要更强 HITL | 新词可以发现，但人工确认流程还可以更顺 | 前端增加“通过/驳回/编辑释义”后自动刷新词典和 Milvus |
 | 图谱扩线仍偏数据驱动 | 小样本时图谱冲击力有限 | 准备一组共享微信、手机号、域名的演示数据，突出团伙关联 |
 | Doris 与 MySQL 可能存在历史不同步 | 重跑或中断后宽表计数可能不一致 | 增加一键 Doris 重建脚本，从 MySQL 最新研判结果回灌宽表 |
