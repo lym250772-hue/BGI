@@ -2,6 +2,27 @@
 
 ## NapCatQQ 桥接（QQ群聊采集）— 完整部署流程
 
+### 采集模式
+
+QQ群采集支持**三种模式**：
+
+| 模式 | CLI参数 | 说明 |
+|------|---------|------|
+| **被动监听** | `--mode listen` | WebSocket实时接收群消息（默认） |
+| **主动拉取** | `--mode fetch` | HTTP API拉取历史消息 |
+| **混合模式** | `--mode both` | 先拉历史，再持续监听（推荐） |
+
+```bash
+# 仅拉取历史消息（每个群200条）
+python main.py collect -p qq_group --qq-groups "123456789" --mode fetch --fetch-count 200
+
+# 仅实时监听（60分钟）
+python main.py collect -p qq_group --mode listen --duration 60
+
+# 混合模式 — 先拉历史，再持续监听（完整覆盖）
+python main.py collect -p qq_group --mode both --fetch-count 300 --duration 30
+```
+
 ### 架构
 ```
 [QQ桌面端 NTQQ] ←──IPC──→ [NapCatQQ 无头客户端]

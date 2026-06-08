@@ -8,7 +8,7 @@ BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析�
 
 本项目覆盖采集 → 分析 → 展示的完整链路。
 
-- 采集层：**7 品类已打通** — 内容平台（微博/知乎/小红书/抖音/贴吧）+ 二手/众包（闲鱼）+ 社交IM（QQ群），纯 HTTP + Playwright + WebSocket 多模式，产出统一 IntelItem 格式。支持评论采集、图片/封面 URL 提取、被动群消息监听。**贴吧已从 Playwright 0.03条/秒提速至 HTTP JSON API ~10条/秒（300x）。** **Telegram 已于 v4.2 停用。**
+- 采集层：**7 品类已打通** — 内容平台（微博/知乎/小红书/抖音/贴吧）+ 二手/众包（闲鱼）+ 社交IM（QQ群），纯 HTTP + Playwright + WebSocket 多模式，产出统一 IntelItem 格式。支持评论采集、图片/封面 URL 提取、QQ群双模式采集（被动监听+主动拉取历史）。**贴吧已从 Playwright 0.03条/秒提速至 HTTP JSON API ~10条/秒（300x）。** **Telegram 已于 v4.2 停用。**
 12	- 🆕 **主动情报收集**: AI人物钓鱼 Skill（Persona Engine），LLM驱动虚拟人物对话，安全护栏保障合规。
 13	
 - 分析层：接收结构化数据，写入 MySQL，执行清洗、分类、实体抽取、黑话研判、图谱扩线、Doris 聚合和前端展示。
@@ -479,7 +479,7 @@ python main.py api
 进入项目目录：
 
 ```bash
-cd "C:\Users\刘一鸣\OneDrive\Desktop\BAGI Intelligence Analysis\BGI"
+cd /path/to/BGI
 ```
 
 安装依赖：
@@ -534,6 +534,14 @@ python main.py api --host 0.0.0.0 --port 8000
 
 ```bash
 python -m pytest tests -q
+```
+
+AI人物钓鱼：
+
+```bash
+python main.py persona list                                                       # 列出可用人物
+python main.py persona run -p ecommerce_buyer -t "platform:uid:name:context"      # 单目标对话
+python main.py persona run-batch -p ecommerce_buyer -f targets.json -o results.json  # 批量对话
 ```
 
 训练 RoBERTa 分类模型：

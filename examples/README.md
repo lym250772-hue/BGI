@@ -2,7 +2,7 @@
 
 本目录存放从各平台采集到的真实黑灰产相关样本数据，用于分析引擎开发、测试和演示。
 
-## 采集概况（2026-06-05 v4.2 最终版）
+## 采集概况（2026-06-08 v4.2 最终版）
 
 | 文件 | 平台 | 类型 | 条目 | 评论 | 采集技术 |
 |------|------|:--:|:--:|:--:|------|
@@ -59,8 +59,10 @@ python main.py login-xianyu
 python scripts/collect_examples.py -k "账号交易,涨粉" --platforms xianyu --max-pages 2
 
 # QQ群（需NapCatQQ）
-python scripts/qq_fetch_history.py --count 500
-python main.py collect -p qq_group --duration 60
+python scripts/qq_fetch_history.py --count 500                                 # 独立历史拉取脚本
+python main.py collect -p qq_group --mode listen --duration 60                 # 仅监听
+python main.py collect -p qq_group --mode fetch --fetch-count 200              # 仅拉历史
+python main.py collect -p qq_group --mode both --fetch-count 300 --duration 30 # 混合模式(推荐)
 
 # 全量黑话关键词采集
 python scripts/collect_xianyu_full.py

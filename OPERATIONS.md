@@ -1,6 +1,6 @@
 # BGI 操作手册 — v4.2 最终版
 
-> 最后更新: 2026-06-05
+> 最后更新: 2026-06-08 v4.2
 
 ---
 
@@ -110,7 +110,9 @@ python main.py login-xianyu
 python main.py collect -p xianyu -k "账号交易" --max-pages 2
 
 # QQ群（需NapCatQQ）
-python main.py collect -p qq_group --duration 60
+python main.py collect -p qq_group --mode listen --duration 60                      # 被动监听
+python main.py collect -p qq_group --qq-groups "123456" --mode fetch --fetch-count 200  # 拉取历史
+python main.py collect -p qq_group --mode both --fetch-count 300 --duration 30      # 先拉后监(推荐)
 
 # 全量黑话采集
 python scripts/collect_xianyu_full.py
@@ -119,6 +121,7 @@ python scripts/qq_fetch_history.py --count 500
 # 人物钓鱼
 python main.py persona list
 python main.py persona run -p ecommerce_buyer -t "platform:uid:name:context"
+python main.py persona run-batch -p ecommerce_buyer -f targets.json -o results.json
 ```
 
 ### 清洗分析

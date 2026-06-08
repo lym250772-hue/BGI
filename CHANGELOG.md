@@ -21,12 +21,20 @@
 |------|------|
 | `bridges/napcat_bridge.py` | NapCatQQ WebSocket 客户端，实时接收群消息推送 |
 | `bridges/README.md` | NapCatQQ 安装配置文档 |
-| `collectors/qq_group_collector.py` | 被动群消息监听采集器 |
+| `collectors/qq_group_collector.py` | 双模式采集器：被动监听 + 主动历史拉取 |
 
-- 架构: QQ桌面端(NTQQ) ←IPC→ NapCatQQ ←WebSocket→ napcat_bridge.py → QQGroupCollector
+- 架构: QQ桌面端(NTQQ) ←IPC→ NapCatQQ ←WebSocket+HTTP→ napcat_bridge.py → QQGroupCollector
 - 新增 `IMMessageItem` 数据模型 (group_id/sender_uid/sender_nickname/message_id…)
 - `im_to_intel()` 转换器 → 统一 IntelItem 格式入库
-- CLI: `python main.py collect -p qq_group --qq-groups "群号" --duration 60`
+- CLI: `python main.py collect -p qq_group --qq-groups "群号" --mode listen --duration 60`
+
+### 🔧 2026-06-08 — QQ群双模式采集 + 文档对齐
+
+- QQ群新增 `--mode fetch` 主动拉取群聊历史消息（HTTP API get_group_msg_history）
+- QQ群新增 `--mode both` 混合模式：先拉历史再持续监听（推荐）
+- 新增 `--fetch-count` 参数控制每个群拉取消息数
+- Persona 新增 `run-batch` 批量对话模式
+- 文档全面对齐：合并重复操作手册，更新所有 QQ 命令示例
 
 ### 🆕 Feature 3: 钓鱼人物 Skill (Persona Engine)
 

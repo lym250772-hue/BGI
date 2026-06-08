@@ -123,8 +123,10 @@ def _load_seed_slang():
 @click.option("--fetch-replies/--no-fetch-replies", default=True, help="Fetch post replies")
 @click.option("--qq-groups", default="", help="Comma-separated QQ group IDs (for qq_group platform)")
 @click.option("--duration", default=60, help="Collection duration in minutes (for qq_group)")
+@click.option("--mode", default="listen", help="QQ群采集模式: listen(监听)/fetch(拉历史)/both(先拉后监)")
+@click.option("--fetch-count", default=200, help="QQ群历史拉取每条群的消息数")
 def collect(platform: str, keywords: str, max_pages: int, fetch_replies: bool,
-            qq_groups: str, duration: int):
+            qq_groups: str, duration: int, mode: str, fetch_count: int):
     """Run data collectors and save to ods_raw_intel."""
     from collectors.registry import get_collector
     from storage.mysql_store import mysql
@@ -136,11 +138,12 @@ def collect(platform: str, keywords: str, max_pages: int, fetch_replies: bool,
         kwargs["max_pages_per_keyword"] = max_pages
         if platform in ("tieba", "zhihu"):
             kwargs["fetch_replies"] = fetch_replies
-    elif platform == "qq_group" and qq_groups:
-        kwargs["group_ids"] = [g.strip() for g in qq_groups.split(",")]
+    elif platform == "qq_group":
+        if qq_groups:
+            kwargs["group_ids"] = [g.strip() for g in qq_groups.split(",")]
         kwargs["collection_duration_minutes"] = duration
-    elif platform == "forum":
-        kwargs["urls"] = keywords.split(",") if keywords else []
+        kwargs["mode"] = mode
+        kwargs["fetch_count"] = fetch_count
 
     collector = get_collector(platform, **kwargs)
     count = 0
@@ -278,6 +281,154 @@ def persona_run(persona_name: str, target: str, message: str):
     if result.safety_flags:
         logger.warning(f"  ⚠️  Safety triggers: {result.safety_flags}")
     logger.info("=" * 60)
+
+
+@persona.command("run-batch")
+@click.option("--persona", "-p", required=True,
+              help="Persona name to use for all targets")
+@click.option("--targets-file", "-f", required=True,
+              help="JSON file with targets array")
+@click.option("--output", "-o", default=None,
+              help="Output JSON file for aggregated results")
+def persona_run_batch(persona_name: str, targets_file: str, output: str):
+    """Run persona conversations against multiple targets from a JSON file.
+
+    Targets file format (targets.json):
+    [
+      {
+        "platform": "xianyu",
+        "uid": "user123",
+        "username": "张三",
+        "context": "提供抖音涨粉服务，真人粉丝不掉，50元1000粉"
+      },
+      ...
+    ]
+
+    Example:
+      python main.py persona run-batch -p ecommerce_buyer -f targets.json -o results.json
+    """
+    import json as _json
+    from pathlib import Path
+    from datetime import datetime
+
+    targets_path = Path(targets_file)
+    if not targets_path.exists():
+        logger.error(f"Targets file not found: {targets_file}")
+        return
+
+    with open(targets_path, "r", encoding="utf-8") as f:
+        targets = _json.load(f)
+
+    if not isinstance(targets, list):
+        logger.error("Targets file must contain a JSON array")
+        return
+
+    from persona.engine import PersonaEngine
+    from persona.collector import PersonaCollector
+    from storage.mysql_store import mysql
+
+    engine = PersonaEngine()
+    results = []
+    aggregated_intel = {
+        "services": [],
+        "pricing": [],
+        "payment_methods": [],
+        "risk_indicators": [],
+    }
+
+    logger.info(f"Batch persona run: [{persona_name}] × {len(targets)} targets")
+
+    for i, t in enumerate(targets):
+        platform = t.get("platform", "unknown")
+        uid = t.get("uid", "")
+        username = t.get("username", f"target_{i}")
+        context = t.get("context", "")
+
+        logger.info(f"[{i+1}/{len(targets)}] Engaging {username} on {platform}...")
+
+        try:
+            result = engine.run_conversation(
+                persona_name=persona_name,
+                target_platform=platform,
+                target_uid=uid,
+                target_username=username,
+                target_context=context,
+            )
+
+            # 聚合情报
+            ext = result.extracted_info or {}
+            if ext.get("services_offered") and ext["services_offered"] != "未知":
+                aggregated_intel["services"].append(ext["services_offered"])
+            if ext.get("pricing") and ext["pricing"] != "未知":
+                aggregated_intel["pricing"].append(ext["pricing"])
+            if ext.get("payment_methods") and ext["payment_methods"] != "未知":
+                aggregated_intel["payment_methods"].append(ext["payment_methods"])
+            if ext.get("risk_indicators"):
+                aggregated_intel["risk_indicators"].extend(ext["risk_indicators"])
+
+            # 入库
+            try:
+                intel_item = PersonaCollector._to_intel(result)
+                mysql.insert_raw({
+                    "source_platform": "persona",
+                    "source_url": f"persona://{result.conversation_id}",
+                    "author_id": result.target_uid,
+                    "author_name": result.target_username,
+                    "content_type": "conversation",
+                    "content_raw": result.conversation_summary,
+                    "raw_status": STATUS_PENDING,
+                    "collect_time": result.collected_at,
+                    "metadata": _json.dumps(intel_item.metadata, ensure_ascii=False, default=str),
+                })
+            except Exception:
+                pass
+
+            results.append({
+                "target": username,
+                "platform": platform,
+                "status": "completed",
+                "turns": len(result.raw_messages),
+                "safety_flags": len(result.safety_flags),
+                "summary": result.conversation_summary,
+                "extracted": result.extracted_info,
+            })
+            logger.info(f"  ✓ {len(result.raw_messages)} turns, {len(result.safety_flags)} safety flags")
+
+        except Exception as exc:
+            logger.error(f"  ✗ Failed: {exc}")
+            results.append({
+                "target": username,
+                "platform": platform,
+                "status": "failed",
+                "error": str(exc),
+            })
+
+    # 输出聚合结果
+    logger.info("=" * 60)
+    logger.info(f"  Batch complete: {len(results)} targets")
+    logger.info(f"  Services discovered: {len(set(aggregated_intel['services']))}")
+    logger.info(f"  Unique pricing models: {len(set(aggregated_intel['pricing']))}")
+    logger.info(f"  Risk indicators: {len(aggregated_intel['risk_indicators'])}")
+    logger.info("=" * 60)
+
+    # 保存结果
+    output_data = {
+        "persona": persona_name,
+        "run_at": datetime.utcnow().isoformat(),
+        "total_targets": len(targets),
+        "results": results,
+        "aggregated_intel": {
+            "services": list(set(aggregated_intel["services"])),
+            "pricing": list(set(aggregated_intel["pricing"])),
+            "payment_methods": list(set(aggregated_intel["payment_methods"])),
+            "risk_indicators": list(set(aggregated_intel["risk_indicators"])),
+        },
+    }
+
+    output_path = output or f"persona_batch_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(output_path, "w", encoding="utf-8") as f:
+        _json.dump(output_data, f, ensure_ascii=False, indent=2, default=str)
+    logger.info(f"Results saved to: {output_path}")
 
 
 # ============================================================================

@@ -26,6 +26,9 @@ data/raw/
 data/cleaned/
 data/modeling/
 data/models/**
+!data/models/**/
+!data/models/**/.gitkeep
+!data/models/**/.gitattributes
 data/images/
 data/browser_profiles/
 model_release/

@@ -77,12 +77,9 @@ def _get_qq_group_collector(**kwargs) -> BaseCollector:
     return QQGroupCollector(
         group_ids=kwargs.get("group_ids", []),
         collection_duration_minutes=kwargs.get("collection_duration_minutes", 60),
+        mode=kwargs.get("mode", "listen"),
+        fetch_count=kwargs.get("fetch_count", 200),
         ws_url=kwargs.get("ws_url", "ws://localhost:3001"))
-
-
-def _get_web_collector(**kwargs) -> BaseCollector:
-    from collectors.web_collector import WebCollector
-    return WebCollector(urls=kwargs.get("urls", []) or kwargs.get("keywords", []))
 
 
 # ── 映射表 ──────────────────────────────────────────────────────────────────
@@ -95,7 +92,6 @@ PLATFORM_MAP: dict[str, callable] = {
     "douyin":      _get_douyin_collector,
     "xianyu":      _get_xianyu_collector,
     "qq_group":    _get_qq_group_collector,
-    "forum":       _get_web_collector,     # 未实现，用 WebCollector stub
 }
 
 
