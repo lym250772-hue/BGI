@@ -604,7 +604,6 @@ BGI/
 ├── docker/                  # MySQL、Neo4j、Milvus、MinIO、Doris 编排
 ├── scripts/
 │   ├── crawl/               # 采集 smoke 测试
-│   ├── data/                # mock 数据生成
 │   ├── demo/                # 单条演示脚本
 │   ├── importers/           # JSONL、黑话词典导入
 │   └── modeling/            # RoBERTa 训练脚本
