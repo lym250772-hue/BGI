@@ -27,7 +27,13 @@ python main.py collect -p qq_group --mode both --fetch-count 300 --duration 30
 ```
 [QQ桌面端 NTQQ] ←──IPC──→ [NapCatQQ 无头客户端]
                                 │
-                     WebSocket (ws://localhost:3001)
+              ┌─────────────────┼─────────────────┐
+              │                                   │
+    HTTP API (port 3000)              WebSocket (ws://localhost:3001)
+    get_group_msg_history             on_message event
+    (主动拉取历史)                      (被动实时监听)
+              │                                   │
+              └─────────────────┬─────────────────┘
                                 │
                         [napcat_bridge.py]
                                 │
@@ -39,7 +45,7 @@ python main.py collect -p qq_group --mode both --fetch-count 300 --duration 30
 **0. 注册一个新QQ号**
 - 用手机号注册一个全新QQ号（不要用个人主号）
 - 不绑定真实身份信息
-- 仅用于被动监听，不发言
+- 仅用于群消息采集，不发言
 
 **1. 加入灰产相关QQ群**
 - 打开QQ桌面客户端，用新号登录
@@ -113,11 +119,14 @@ curl http://localhost:3000/api/get_login_info
 
 **6. 启动 BGI QQ群采集**
 ```bash
-# 监听5分钟测试
-python main.py collect -p qq_group --duration 5
+# 被动监听（默认）
+python main.py collect -p qq_group --mode listen --duration 5
 
-# 监听指定群60分钟
-python main.py collect -p qq_group --qq-groups "123456789" --duration 60
+# 主动拉取历史消息
+python main.py collect -p qq_group --qq-groups "123456789" --mode fetch --fetch-count 200
+
+# 混合模式 — 先拉历史再监听（推荐）
+python main.py collect -p qq_group --mode both --fetch-count 300 --duration 60
 ```
 
 ### 故障排查

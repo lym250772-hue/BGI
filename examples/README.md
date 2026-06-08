@@ -12,7 +12,7 @@
 | `douyin_sample.json` | 抖音 | 内容 | 1,167 | 1,267 | X-Bogus + v3持久化浏览器 |
 | `tieba_sample.json` | 贴吧 | 内容 | 1,141 | 876 | JSON API ~10/s + DOM回复 |
 | `xianyu_sample.json` 🆕 | 闲鱼 | 二手/众包 | 1,389 | — | v3持久化浏览器 + DOM |
-| `qq_group_sample.json` 🆕 | QQ群 | 社交IM | 620 | — | NapCatQQ WebSocket |
+| `qq_group_sample.json` 🆕 | QQ群 | 社交IM | 620 | — | NapCatQQ WebSocket+HTTP API |
 | ~~`telegram_sample.json`~~ | Telegram | — | — | — | 已停用 |
 
 > **合计**: **10,248条目 / 17,916评论** / 7品类 / 48黑话关键词

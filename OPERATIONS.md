@@ -8,7 +8,7 @@
 
 位置: `data/slang_dict/seed_slang.json`
 
-**49个黑话关键词**（采集时逐词搜索，覆盖7平台）:
+**48个黑话关键词**（采集时逐词搜索，覆盖7平台）:
 
 ```
 714高炮, AB贷, 上车, 下车, 云手机, 人脸, 代下, 代理IP, 众包, 八件套,
@@ -129,7 +129,7 @@ python main.py persona run-batch -p ecommerce_buyer -f targets.json -o results.j
 ```bash
 python main.py clean -l 500       # 清洗去重
 python main.py analyze -l 200     # L1→L2→L3 分类+实体+评分
-python main.py ui                 # 启动前端 (默认8501)
+python main.py ui                 # 启动前端 (端口8600)
 python main.py api                # 启动FastAPI (8000)
 ```
 
@@ -144,11 +144,11 @@ python main.py api                # 启动FastAPI (8000)
 | `xiaohongshu_sample.json` | 小红书 | 内容 | 2,556 |
 | `weibo_sample.json` | 微博 | 内容 | 1,768 |
 | `zhihu_sample.json` | 知乎 | 内容 | 1,607 |
-| `xianyu_sample.json` | 闲鱼 | 二手 | 1,365 |
+| `xianyu_sample.json` | 闲鱼 | 二手 | 1,389 |
 | `douyin_sample.json` | 抖音 | 内容 | 1,167 |
 | `tieba_sample.json` | 贴吧 | 内容 | 1,141 |
 | `qq_group_sample.json` | QQ群 | 社交 | 620 |
-| **合计** | **7平台** | **3品类** | **10,224** |
+| **合计** | **7平台** | **3品类** | **10,248** |
 
 ### 统一数据格式
 
