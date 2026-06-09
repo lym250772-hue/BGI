@@ -892,3 +892,164 @@ def graph_neighbors(entity_type: str, value: str, depth: int = 2) -> list[dict]:
             "关系跳数": len(rels),
         })
     return output
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 清洗层接入函数
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def run_cleaning(raw_ids: list[int]) -> dict:
+    """对指定 raw_id 列表执行清洗，返回清洗统计和详情。
+
+    Returns:
+        {
+            "total": int,
+            "cleaned": int,
+            "discarded": int,
+            "details": [{"id": int, "platform": str, "original": str, "text": str,
+                          "status": str, "noise_reason": str, "noise_score": float,
+                          "is_duplicate": bool}, ...],
+            "errors": [str, ...],
+        }
+    """
+    from cleaner.pipeline import CleaningPipeline
+    from storage.mysql_store import mysql
+
+    pipeline = CleaningPipeline()
+
+    # 加载已有 simhash
+    existing_hashes = []
+    try:
+        existing_hashes = mysql.list_existing_simhashes(limit=5000)
+    except Exception:
+        pass
+
+    # 获取原始数据
+    items = []
+    for raw_id in raw_ids:
+        try:
+            row = mysql.get_raw_by_id(raw_id)
+            if row:
+                items.append({
+                    "id": row["id"],
+                    "platform": row.get("source_platform") or "unknown",
+                    "content_raw": row.get("content_raw") or "",
+                })
+        except Exception as exc:
+            pass
+
+    # 执行清洗
+    cleaned, discarded = 0, 0
+    details: list[dict] = []
+    errors: list[str] = []
+
+    for item in items:
+        try:
+            result = pipeline.process(
+                item["content_raw"],
+                existing_hashes=existing_hashes,
+                platform=item["platform"],
+            )
+
+            if result["should_discard"]:
+                mysql.update_raw_status(item["id"], "DISCARDED",
+                                        clean_text=result["text"])
+                discarded += 1
+            else:
+                mysql.update_raw_status(
+                    item["id"], "CLEANED",
+                    clean_text=result["text"],
+                    simhash=result["simhash"],
+                )
+                existing_hashes.append(result["simhash"])
+                cleaned += 1
+
+            details.append({
+                "id": item["id"],
+                "platform": item["platform"],
+                "original": item["content_raw"],
+                "text": result["text"],
+                "status": "CLEANED" if not result["should_discard"] else "DISCARDED",
+                "noise_reason": result["noise_reason"],
+                "noise_score": result.get("noise_score", 0),
+                "is_duplicate": result["is_duplicate"],
+            })
+        except Exception as exc:
+            errors.append(f"清理 raw_id={item['id']} 失败: {exc}")
+
+    return {
+        "total": len(items),
+        "cleaned": cleaned,
+        "discarded": discarded,
+        "details": details,
+        "errors": errors,
+    }
+
+
+def get_cleaning_preview(raw_id: int) -> dict | None:
+    """返回单条数据的清洗前后对比，用于 UI 演示展示。
+
+    Returns:
+        {
+            "raw_id": int,
+            "platform": str,
+            "original": str,
+            "cleaned": str,
+            "simhash": str,
+            "noise_score": float,
+            "noise_reasons": [str, ...],
+            "priority": str,
+            "should_discard": bool,
+            "steps": {
+                "emoji": {"emojis_found": [...], "emoji_count": int},
+                "platform": {"is_platform_noise": bool, "platform_noise_reason": str},
+                "score": {"noise_score": float, "noise_reasons": [...]},
+            },
+        }
+    """
+    from cleaner.pipeline import CleaningPipeline
+
+    # 获取原始数据
+    raw_row = None
+    try:
+        from storage.mysql_store import mysql
+        raw_row = mysql.get_raw_by_id(raw_id)
+    except Exception:
+        pass
+
+    # 如果 DB 不可用，返回 None
+    if not raw_row:
+        return None
+
+    platform = raw_row.get("source_platform") or "unknown"
+    original = raw_row.get("content_raw") or ""
+
+    # 单条清洗
+    pipeline = CleaningPipeline()
+    result = pipeline.clean_single(platform, original)
+
+    return {
+        "raw_id": raw_id,
+        "platform": platform,
+        "original": original,
+        "cleaned": result["text"],
+        "simhash": result["simhash"],
+        "noise_score": result["noise_score"],
+        "noise_reasons": result["noise_reason"].split(" | ") if result["noise_reason"] else [],
+        "priority": result["priority"],
+        "should_discard": result["should_discard"],
+        "steps": {
+            "emoji": {
+                "emojis_found": result["steps"]["emoji"]["emojis_found"],
+                "emoji_count": result["steps"]["emoji"]["emoji_count"],
+            },
+            "platform": {
+                "is_platform_noise": result["steps"]["platform"]["is_platform_noise"],
+                "platform_noise_reason": result["steps"]["platform"]["platform_noise_reason"],
+            },
+            "score": {
+                "noise_score": result["steps"]["score"]["noise_score"],
+                "noise_reasons": result["steps"]["score"]["noise_reasons"],
+            },
+        },
+    }

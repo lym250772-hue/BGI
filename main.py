@@ -437,22 +437,55 @@ def persona_run_batch(persona_name: str, targets_file: str, output: str):
 
 @cli.command()
 @click.option("--limit", "-l", default=500, help="Max items to clean per run")
-def clean(limit: int):
-    """Run cleaning pipeline on raw intel."""
+@click.option("--platform", "-p", default=None,
+              help="Filter by platform (weibo/zhihu/tieba/xiaohongshu/douyin/xianyu/qq_group)")
+def clean(limit: int, platform: str):
+    """Run cleaning pipeline on raw intel with author-aware SimHash dedup."""
     from cleaner.pipeline import CleaningPipeline
     from storage.mysql_store import mysql
 
-    pipeline = CleaningPipeline()
-    pending = mysql.list_raw(status=STATUS_PENDING, limit=limit)
+    # 加载已有 simhash 用于去重
+    existing_hashes = mysql.list_existing_simhashes(limit=5000)
+    logger.info(f"Loaded {len(existing_hashes)} existing simhashes for dedup")
 
-    cleaned, discarded = 0, 0
+    pipeline = CleaningPipeline()
+    pending = mysql.list_raw(status=STATUS_PENDING, limit=limit, platform=platform)
+    logger.info(f"Found {len(pending)} pending items to clean{f' (platform={platform})' if platform else ''}")
+
+    cleaned, discarded, media_only, similar = 0, 0, 0, 0
     for item in pending:
-        text = item.get("content_raw", "")
-        result = pipeline.process(text)
-        if result["should_discard"]:
+        raw_text = item.get("content_raw", "")
+        item_platform = item.get("source_platform") or platform or "unknown"
+        author_uid = item.get("author_uid") or ""
+        author_username = item.get("author_username") or ""
+
+        result = pipeline.process(raw_text, existing_hashes=existing_hashes,
+                                  platform=item_platform,
+                                  author_uid=author_uid,
+                                  author_username=author_username)
+
+        status = result.get("status", "CLEANED" if not result["should_discard"] else "DISCARDED")
+
+        if status == "DISCARDED":
             mysql.update_raw_status(item["id"], STATUS_DISCARDED,
                                     clean_text=result["text"])
             discarded += 1
+        elif status == "MEDIA_ONLY":
+            # 纯媒体占位：保留，标记为 CLEANED 但注明需要媒体分析
+            mysql.update_raw_status(
+                item["id"], STATUS_CLEANED,
+                clean_text=result["text"],
+                simhash=result["simhash"],
+            )
+            media_only += 1
+        elif status == "SIMILAR":
+            # 不同作者相似内容：保留（情报线索），记录相似引用
+            mysql.update_raw_status(
+                item["id"], STATUS_CLEANED,
+                clean_text=result["text"],
+                simhash=result["simhash"],
+            )
+            similar += 1
         else:
             mysql.update_raw_status(
                 item["id"], STATUS_CLEANED,
@@ -461,10 +494,18 @@ def clean(limit: int):
             )
             cleaned += 1
 
-        if (cleaned + discarded) % 20 == 0:
-            logger.info(f"Cleaned {cleaned + discarded} items...")
+        existing_hashes.append(result["simhash"])  # 加入去重池
 
-    logger.info(f"Cleaning complete: {cleaned} kept, {discarded} discarded")
+        total = cleaned + discarded + media_only + similar
+        if total % 20 == 0:
+            logger.info(f"Cleaned {total} items "
+                        f"({cleaned} cleaned, {similar} similar-diff-author, "
+                        f"{media_only} media-only, {discarded} discarded)...")
+
+    total = cleaned + discarded + media_only + similar
+    logger.info(f"Cleaning complete: {cleaned} cleaned, {similar} similar(diff author), "
+                f"{media_only} media-only, {discarded} discarded "
+                f"out of {len(pending)} items")
 
 
 # ============================================================================

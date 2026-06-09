@@ -1,6 +1,6 @@
 # BGI 操作手册 — v4.2 最终版
 
-> 最后更新: 2026-06-08 v4.2
+> 最后更新: 2026-06-10 v4.2 (清洗层: 作者感知去重 + 内容角色五分类 + MEDIA_ONLY)
 
 ---
 
@@ -18,7 +18,7 @@
 破盾, 羊头, 羊腿, 群控, 薅羊毛, 融车, 跑分, 车手, 黄牛
 ```
 
-**数据采集策略**: 用以上49个关键词，在7个平台上逐个搜索，结果保存为统一 IntelItem 格式到 `examples/` 目录。
+**数据采集策略**: 用以上48个关键词，在7个平台上逐个搜索，结果保存为统一 IntelItem 格式到 `examples/` 目录。
 
 ---
 
@@ -127,11 +127,13 @@ python main.py persona run-batch -p ecommerce_buyer -f targets.json -o results.j
 ### 清洗分析
 
 ```bash
-python main.py clean -l 500       # 清洗去重
+python main.py clean -l 500       # 6步管道: 作者感知去重+内容角色分类+MEDIA_ONLY保护
 python main.py analyze -l 200     # L1→L2→L3 分类+实体+评分
 python main.py ui                 # 启动前端 (端口8600)
 python main.py api                # 启动FastAPI (8000)
 ```
+
+**清洗管道**: 6步零LLM调用 — Emoji语义翻译(100+映射) → 平台感知过滤(7平台) → 文本规范化 → **作者感知SimHash去重**(同作者+相似=丢弃,不同作者+相似=情报保留) → 12维噪声评分(短文本情报免罚) → 36高危关键词优先级标记。新增 MEDIA_ONLY 状态([image]等纯媒体不丢弃)、内容角色五分类(actor/media/police/victim/unknown)。
 
 ---
 
@@ -162,7 +164,7 @@ python main.py api                # 启动FastAPI (8000)
 |------|------|------|
 | **UI打开空白** | Docker未启动 | 先启动Docker Desktop，等图标变绿，再启动UI |
 | **Docker频繁崩溃** | Docker Desktop VM不稳定 | 重启Docker Desktop（右键托盘→Restart） |
-| 采集返回0条 | Cookie过期 | `python login_edge.py <平台>` |
+| 采集返回0条 | Cookie过期 | `python main.py login-<平台>` 或通用 interactive_login() |
 | 闲鱼0条/验证码 | 阿里反爬 | 等15分钟；限量20-30条/次 |
 | QQ群无连接 | NapCatQQ未启动 | 启动NapCatQQ；确认 ws://localhost:3001 |
 | LLM功能降级 | API Key无效 | 编辑 `.env` → `BGI_LLM_API_KEY` |

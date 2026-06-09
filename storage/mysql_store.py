@@ -644,6 +644,19 @@ class MySQLStore:
                 return raw["content_raw"]
             return fallback or ""
 
+    def list_existing_simhashes(self, limit: int = 5000) -> list[str]:
+        """返回已清洗条目的 simhash 列表，用于去重比对。"""
+        try:
+            with self.cursor() as c:
+                c.execute(
+                    "SELECT simhash FROM dwd_clean_intel "
+                    "WHERE simhash IS NOT NULL AND simhash != '' "
+                    "ORDER BY id DESC LIMIT %s",
+                    (limit,))
+                return [r["simhash"] for r in c.fetchall()]
+        except Exception:
+            return []
+
     def find_by_simhash(self, simhash: str, limit: int = 5) -> list[dict]:
         with self.cursor() as c:
             c.execute(

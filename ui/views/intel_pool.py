@@ -80,37 +80,115 @@ def render_pool(include_header: bool = True):
 
     rows = data.list_intel(status=STATUS_OPTIONS[status_label], keyword=keyword, limit=int(limit))
     eligible = [r for r in rows if r.get("raw_status") in ("RAW_COLLECTED", "CLEANED", "FAILED")]
+    pending_clean = [r for r in rows if r.get("raw_status") == "RAW_COLLECTED"]
+    cleaned_ready = [r for r in rows if r.get("raw_status") == "CLEANED"]
 
-    b1, b2, b3 = st.columns([1, 1, 2])
+    # ── 统计指标 ──
+    b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
     b1.metric("当前结果", len(rows))
-    b2.metric("可提交", len(eligible))
-    with b3:
-        if st.button(
-            "提交当前筛选到智能分层队列",
-            type="primary",
-            disabled=not eligible,
-            use_container_width=True,
-        ):
-            job_ids = data.submit_batch_jobs(
-                eligible,
-                options={
-                    "enable_llm": False,
-                    "enable_roberta": False,
-                    "enable_embedding": False,
-                    "enable_graph_expand": False,
-                    "enable_report": False,
-                    "analysis_mode": "批量智能初筛",
-                    "auto_escalate": True,
-                    "standard_threshold": 0.45,
-                    "graph_threshold": 0.55,
-                },
-                max_items=int(batch_size),
-            )
-            st.session_state.pool_last_jobs = job_ids
-            st.success(
-                f"已提交 {len(job_ids)} 个初筛任务；命中条件的样本会自动追加标准研判或扩线研判。"
-            )
-            st.rerun()
+    b2.metric("待清洗", len(pending_clean),
+              delta=None if not pending_clean else f"{len(pending_clean)}条需处理")
+    b3.metric("已清洗", len(cleaned_ready))
+    b4.metric("可研判", len(eligible))
+
+    # ── 一键清洗按钮 ──
+    if pending_clean:
+        clean_col, _ = st.columns([1, 3])
+        with clean_col:
+            if st.button(
+                "一键清洗",
+                type="primary",
+                disabled=not pending_clean,
+                use_container_width=True,
+                key="pool_clean_btn",
+                help=f"对当前筛选结果中 {len(pending_clean)} 条待清洗数据执行清洗管道",
+            ):
+                raw_ids = [int(r["id"]) for r in pending_clean]
+                with st.spinner(f"正在清洗 {len(raw_ids)} 条数据..."):
+                    result = data.run_cleaning(raw_ids)
+                st.session_state["pool_clean_result"] = result
+                st.rerun()
+
+        # 显示清洗结果
+        if st.session_state.get("pool_clean_result"):
+            cr = st.session_state["pool_clean_result"]
+            rc1, rc2, rc3 = st.columns(3)
+            rc1.metric("已处理", cr["total"])
+            rc2.metric("保留", cr["cleaned"], delta=f"{cr['cleaned']}条通过清洗")
+            rc3.metric("丢弃", cr["discarded"],
+                      delta=f"{cr['discarded']}条噪声/重复" if cr["discarded"] else None)
+
+            # 展示清洗详情
+            if cr.get("details"):
+                with st.expander(f"清洗详情（{len(cr['details'])} 条）", expanded=False):
+                    for d in cr["details"]:
+                        icon = "✅" if d["status"] == "CLEANED" else "🗑️"
+                        dup_mark = " [重复]" if d.get("is_duplicate") else ""
+                        st.markdown(
+                            f"""
+                            <div style='margin-bottom:8px;padding:8px;border-radius:6px;
+                                        background:{'#162312' if d['status']=='CLEANED' else '#231616'};
+                                        border-left:3px solid {'#4CAF50' if d['status']=='CLEANED' else '#F44336'}'>
+                              <div style='font-size:0.8rem;margin-bottom:4px'>
+                                {icon} <strong>#{d['id']}</strong> [{d['platform']}]{dup_mark}
+                                <span style='color:#92A1AF'> — {d['status']}</span>
+                                <span style='color:#92A1AF;float:right'>噪声分: {d['noise_score']:.2f}</span>
+                              </div>
+                              <div style='font-size:0.7rem;color:#92A1AF;margin-bottom:4px'>
+                                原因: {d.get('noise_reason') or '无'}
+                              </div>
+                              <div style='font-size:0.68rem;display:flex;gap:10px'>
+                                <span style='flex:1;color:#FF9800'>原始: {(d.get('original') or '')[:80]}{'...' if len(d.get('original') or '') > 80 else ''}</span>
+                              </div>
+                              <div style='font-size:0.68rem;margin-top:2px'>
+                                <span style='flex:1;color:#4CAF50'>清洗: {(d.get('text') or '')[:80]}{'...' if len(d.get('text') or '') > 80 else ''}</span>
+                              </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+            if cr.get("errors"):
+                for err in cr["errors"]:
+                    st.warning(err)
+
+            # 清除结果按钮
+            if st.button("清除清洗记录", key="pool_clear_result"):
+                del st.session_state["pool_clean_result"]
+                st.rerun()
+
+    # ── 提交研判按钮（仅已清洗数据可提交）──
+    st.markdown("---")
+    submit_disabled = not eligible
+    if st.button(
+        "提交已清洗数据到智能分层研判",
+        type="primary" if cleaned_ready else "secondary",
+        disabled=submit_disabled,
+        use_container_width=True,
+        key="pool_submit_btn",
+        help="将 CLEANED 状态的数据提交后台研判",
+    ):
+        # 优先提交已清洗的，其次提交其他可研判的
+        to_submit = cleaned_ready or eligible
+        job_ids = data.submit_batch_jobs(
+            to_submit,
+            options={
+                "enable_llm": False,
+                "enable_roberta": False,
+                "enable_embedding": False,
+                "enable_graph_expand": False,
+                "enable_report": False,
+                "analysis_mode": "批量智能初筛",
+                "auto_escalate": True,
+                "standard_threshold": 0.45,
+                "graph_threshold": 0.55,
+            },
+            max_items=int(batch_size),
+        )
+        st.session_state.pool_last_jobs = job_ids
+        st.success(
+            f"已提交 {len(job_ids)} 个初筛任务；命中条件的样本会自动追加标准研判或扩线研判。"
+        )
+        st.rerun()
 
     if not rows:
         empty_panel("没有符合条件的情报", "可以调整筛选条件，或等待新的结构化数据入库。")
