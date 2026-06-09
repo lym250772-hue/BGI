@@ -15,6 +15,7 @@ State graph:
 
 import hashlib
 import json
+import time
 from loguru import logger
 from dataclasses import dataclass, field
 
@@ -83,6 +84,25 @@ class SlangNormalizeTool:
     name = "slang_normalize"
     description = "Look up slang terms in dim_slang_dict to get normalized meanings"
 
+    def __init__(self):
+        self._slang_meaning_map = {}
+        self._cache_until = 0.0
+
+    def _get_slang_meaning_map(self) -> dict:
+        if time.time() < self._cache_until and self._slang_meaning_map:
+            return self._slang_meaning_map
+        try:
+            from storage.mysql_store import mysql as _mysql
+            self._slang_meaning_map = {
+                s.get("term", ""): s.get("normalized_meaning", "")
+                for s in _mysql.list_slang("active")
+                if s.get("term")
+            }
+            self._cache_until = time.time() + 60
+        except Exception:
+            pass
+        return self._slang_meaning_map
+
     def run(self, state: dict) -> dict:
         entities = state.get("entities", [])
         slang_entities = [e for e in entities if self._is_slang(e)]
@@ -92,14 +112,7 @@ class SlangNormalizeTool:
                                        "reason": "no slang entities"})
             return state
 
-        # Build slang meaning lookup
-        slang_meaning_map = {}
-        try:
-            from storage.mysql_store import mysql as _mysql
-            for s in _mysql.list_slang("active"):
-                slang_meaning_map[s.get("term", "")] = s.get("normalized_meaning", "")
-        except Exception:
-            pass
+        slang_meaning_map = self._get_slang_meaning_map()
 
         seen_slang = set()
         slang_terms = []
@@ -143,6 +156,7 @@ class DedupCheckTool:
         """Check if similar intel has been analyzed before."""
         text = state.get("clean_text", "")
         classification_conf = state.get("classification_confidence", 0)
+        current_raw_id = state.get("raw_id")
 
         # Only run dedup if classification has reasonable confidence
         if classification_conf < 0.6:
@@ -151,24 +165,36 @@ class DedupCheckTool:
             state["similar_intel_ids"] = []
             return state
 
+        embed_fn = state.get("_embed_fn")
+        if not embed_fn:
+            state["similar_intel_ids"] = []
+            state["tool_log"].append({"tool": self.name, "decision": "skipped",
+                                       "reason": "no embedding function"})
+            return state
+
         try:
+            vec = embed_fn(text)
             from storage.milvus_store import milvus
-            embed_fn = state.get("_embed_fn")
-            if embed_fn:
-                vec = embed_fn(text)
-                text_hash = hashlib.md5(text.encode()).hexdigest()
-                results = milvus.search_similar_intel(vec, top_k=5)
-                similar = []
-                for r in results:
-                    if r.get("score", 1.0) < 0.3:  # cosine distance threshold
-                        similar.append(r.get("raw_data_id"))
-                state["similar_intel_ids"] = similar
-                state["tool_log"].append({"tool": self.name, "decision": "run",
-                                           "result": f"{len(similar)} similar found"})
-            else:
-                state["similar_intel_ids"] = []
-                state["tool_log"].append({"tool": self.name, "decision": "skipped",
-                                           "reason": "no embedding function"})
+            results = milvus.search_similar_intel(vec, top_k=5)
+            similar = []
+            for r in results:
+                raw_id = r.get("raw_data_id")
+                try:
+                    if raw_id is not None and current_raw_id is not None and int(raw_id) == int(current_raw_id):
+                        continue
+                except (TypeError, ValueError):
+                    pass
+
+                distance = float(r.get("score", 1.0))
+                if distance < 0.3:  # cosine distance threshold; lower means closer
+                    similar.append({
+                        "raw_id": raw_id,
+                        "distance": round(distance, 4),
+                        "similarity": round(max(0.0, 1.0 - distance), 4),
+                    })
+            state["similar_intel_ids"] = similar
+            state["tool_log"].append({"tool": self.name, "decision": "run",
+                                       "result": f"{len(similar)} similar found"})
         except Exception as exc:
             logger.warning(f"DedupCheck failed: {exc}")
             state["similar_intel_ids"] = []
@@ -203,6 +229,7 @@ class AnalysisAgent:
             "dedup_check": DedupCheckTool(),
         }
         self._embed_fn = None
+        self._entity_extractor = None
         self._llm_failure_count = 0
         self._circuit_open = False
 
@@ -211,7 +238,10 @@ class AnalysisAgent:
     def run(self, raw_data_id: int, text: str, platform: str,
             enable_graph_expand: bool = True,
             enable_report: bool = True,
-            enable_llm: bool = True) -> dict:
+            enable_llm: bool = True,
+            enable_embedding: bool = False,
+            enable_roberta: bool = True,
+            analysis_mode: str = "") -> dict:
         """Run full analysis via state machine.
 
         Returns a dict matching the PROJECT_PLAN.md AnalyzeResponse format.
@@ -220,6 +250,9 @@ class AnalysisAgent:
         state["enable_graph_expand"] = enable_graph_expand
         state["enable_report"] = enable_report
         state["enable_llm"] = enable_llm
+        state["enable_embedding"] = enable_embedding
+        state["enable_roberta"] = enable_roberta
+        state["analysis_mode"] = analysis_mode
 
         logger.info(f"[{raw_data_id}] Agent starting analysis, text_len={len(text)}")
 
@@ -246,7 +279,10 @@ class AnalysisAgent:
     def run_stream(self, raw_data_id: int, text: str, platform: str,
                    enable_graph_expand: bool = True,
                    enable_report: bool = True,
-                   enable_llm: bool = True):
+                   enable_llm: bool = True,
+                   enable_embedding: bool = False,
+                   enable_roberta: bool = True,
+                   analysis_mode: str = ""):
         """Generator that yields each analysis step with think-chain for UI display.
 
         Each yield is a dict:
@@ -256,6 +292,9 @@ class AnalysisAgent:
         state["enable_graph_expand"] = enable_graph_expand
         state["enable_report"] = enable_report
         state["enable_llm"] = enable_llm
+        state["enable_embedding"] = enable_embedding
+        state["enable_roberta"] = enable_roberta
+        state["analysis_mode"] = analysis_mode
 
         # ── Step 1: Classify ──
         yield {
@@ -545,22 +584,48 @@ class AnalysisAgent:
             "enable_graph_expand": True,
             "enable_report": True,
             "enable_llm": True,
+            "enable_embedding": False,
+            "enable_roberta": True,
+            "analysis_mode": "",
+            "raw_status": "",
             "_embed_fn": self._embed_fn,
         }
+
+    @staticmethod
+    def _target_raw_status(state: dict) -> str:
+        """Return the business status written back to ods_raw_intel."""
+        mode = str(state.get("analysis_mode") or "")
+        fast_flags = (
+            not state.get("enable_llm", True)
+            and not state.get("enable_roberta", True)
+            and not state.get("enable_embedding", False)
+            and not state.get("enable_graph_expand", True)
+        )
+        if "快速" in mode or fast_flags:
+            return "SCREENED"
+        return "ANALYZED"
 
     # ── State: Classify ───────────────────────────────────────────────────
 
     def _state_classify(self, state: dict) -> dict:
         """L1→L2→L3 cascade with circuit breaker."""
         enable_llm = state.get("enable_llm", True)
+        enable_roberta = state.get("enable_roberta", True)
         if self._circuit_open or not enable_llm:
             logger.warning("Circuit breaker OPEN — using L1+L2 fallback")
-            result = self._run_classify(state["clean_text"], skip_llm=True)
+            result = self._run_classify(
+                state["clean_text"],
+                skip_llm=True,
+                skip_roberta=not enable_roberta,
+            )
             if self._circuit_open:
                 result["method"] = self.DEGRADED_METHOD
         else:
             try:
-                result = self._run_classify_with_retry(state["clean_text"])
+                result = self._run_classify_with_retry(
+                    state["clean_text"],
+                    skip_roberta=not enable_roberta,
+                )
                 self._llm_failure_count = 0
             except Exception as exc:
                 self._llm_failure_count += 1
@@ -569,7 +634,11 @@ class AnalysisAgent:
                 if self._llm_failure_count >= self.CIRCUIT_THRESHOLD:
                     self._circuit_open = True
                     logger.critical("CIRCUIT BREAKER OPENED")
-                result = self._run_classify(state["clean_text"], skip_llm=True)
+                result = self._run_classify(
+                    state["clean_text"],
+                    skip_llm=True,
+                    skip_roberta=not enable_roberta,
+                )
                 result["method"] = self.DEGRADED_METHOD
 
         label = result["intent_label"]
@@ -579,11 +648,11 @@ class AnalysisAgent:
         state["classification_method"] = result.get("method", "")
         return state
 
-    def _run_classify(self, text: str, skip_llm: bool = False) -> dict:
+    def _run_classify(self, text: str, skip_llm: bool = False, skip_roberta: bool = False) -> dict:
         from analyzer.classifier import classifier as _classifier
-        return _classifier.classify(text, skip_llm=skip_llm)
+        return _classifier.classify(text, skip_llm=skip_llm, skip_roberta=skip_roberta)
 
-    def _run_classify_with_retry(self, text: str) -> dict:
+    def _run_classify_with_retry(self, text: str, skip_roberta: bool = False) -> dict:
         if self._tenacity_available():
             import tenacity
             fn = tenacity.retry(
@@ -591,9 +660,9 @@ class AnalysisAgent:
                 wait=tenacity.wait_exponential(multiplier=2.0, min=1, max=30),
                 retry=tenacity.retry_if_exception_type(Exception),
                 reraise=True,
-            )(lambda: self._run_classify(text, skip_llm=False))
+            )(lambda: self._run_classify(text, skip_llm=False, skip_roberta=skip_roberta))
         else:
-            fn = lambda: self._run_classify(text, skip_llm=False)
+            fn = lambda: self._run_classify(text, skip_llm=False, skip_roberta=skip_roberta)
         return fn()
 
     # ── State: Extract Entities ───────────────────────────────────────────
@@ -603,10 +672,10 @@ class AnalysisAgent:
         text = state["clean_text"]
         intent_label = state["risk_label"]
         classification_confidence = state.get("classification_confidence", 0.0)
+        enable_embedding = state.get("enable_embedding", False)
 
         try:
-            from analyzer.entity_extractor import EntityExtractor
-            extractor = EntityExtractor()
+            extractor = self._get_entity_extractor()
             pre_entities = []
             pre_entities.extend(extractor.extract_regex(text))
             pre_entities.extend(extractor.extract_dict(text))
@@ -618,20 +687,25 @@ class AnalysisAgent:
                 "wechat", "qq", "phone", "url", "domain", "bank_card", "alipay",
                 "telegram", "email", "crypto_wallet", "slang", "tool",
             }
-            if classification_confidence >= 0.8 and len(high_value_hit) >= 2:
+            if classification_confidence >= 0.9 and pre_entities:
                 entities = pre_entities
                 state["tool_log"].append({
                     "tool": "entity_extract",
                     "decision": "fast_path",
-                    "reason": "regex/dict high confidence; embedding and LLM skipped",
+                    "reason": "high-confidence rule/dict hit; embedding and LLM skipped",
                 })
             else:
-                self._load_embedding_model()
-                state["_embed_fn"] = self._embed_fn
+                if enable_embedding:
+                    self._load_embedding_model()
+                    state["_embed_fn"] = self._embed_fn
+                    embed_fn = self._embed_fn
+                else:
+                    state["_embed_fn"] = None
+                    embed_fn = None
                 enable_llm = state.get("enable_llm", True)
                 if self._circuit_open or not enable_llm:
                     entities = extractor.extract_l1_l2_only(
-                        text, embed_fn=self._embed_fn, intent_label=intent_label,
+                        text, embed_fn=embed_fn, intent_label=intent_label,
                     )
                 elif self._tenacity_available():
                     import tenacity
@@ -641,21 +715,21 @@ class AnalysisAgent:
                         retry=tenacity.retry_if_exception_type(Exception),
                         reraise=True,
                     )(lambda: extractor.extract(
-                        text, embed_fn=self._embed_fn, intent_label=intent_label,
+                        text, embed_fn=embed_fn, intent_label=intent_label,
                         classification_confidence=classification_confidence,
                     ))
                     entities = fn()
                 else:
                     entities = extractor.extract(
-                        text, embed_fn=self._embed_fn, intent_label=intent_label,
+                        text, embed_fn=embed_fn, intent_label=intent_label,
                         classification_confidence=classification_confidence,
                     )
         except Exception as exc:
             logger.warning(f"LLM entity extraction failed, using L1+L2: {exc}")
-            from analyzer.entity_extractor import EntityExtractor
-            extractor = EntityExtractor()
+            extractor = self._get_entity_extractor()
             entities = extractor.extract_l1_l2_only(
-                text, embed_fn=self._embed_fn, intent_label=intent_label,
+                text, embed_fn=self._embed_fn if state.get("enable_embedding", False) else None,
+                intent_label=intent_label,
             )
 
         # Deduplicate
@@ -690,11 +764,27 @@ class AnalysisAgent:
         state = self.tools["graph_expand"].run(state, enable_graph=enable_graph)
 
         # Tool 2: Slang Normalize
-        state = self.tools["slang_normalize"].run(state)
+        slang_tool = self.tools["slang_normalize"]
+        if (
+            getattr(slang_tool, "_slang_meaning_map", None) == {}
+            and self._entity_extractor is not None
+            and getattr(self._entity_extractor, "_slang_dict", None)
+        ):
+            slang_tool._slang_meaning_map = dict(self._entity_extractor._slang_dict)
+            slang_tool._cache_until = time.time() + 60
+        state = slang_tool.run(state)
 
         # Tool 3: Dedup Check
-        state["_embed_fn"] = self._embed_fn
-        state = self.tools["dedup_check"].run(state)
+        if state.get("enable_embedding", False):
+            state["_embed_fn"] = self._embed_fn
+            state = self.tools["dedup_check"].run(state)
+        else:
+            state["similar_intel_ids"] = []
+            state["tool_log"].append({
+                "tool": "dedup_check",
+                "decision": "skipped",
+                "reason": "embedding disabled",
+            })
 
         return state
 
@@ -723,13 +813,13 @@ class AnalysisAgent:
         state["evidence_spans"] = evidence
         return state
 
-    @staticmethod
-    def _detect_new_slang_candidates(state: dict, entities: list[dict]) -> list[dict]:
+    def _detect_new_slang_candidates(self, state: dict, entities: list[dict]) -> list[dict]:
         """Find slang-like terms discovered by embedding/LLM that are not active dict terms."""
-        known_terms = set()
+        known_terms = set(self._get_entity_extractor()._slang_dict.keys())
         try:
-            from storage.mysql_store import mysql as _mysql
-            known_terms = {row.get("term") for row in _mysql.list_slang("active") if row.get("term")}
+            if not known_terms:
+                from storage.mysql_store import mysql as _mysql
+                known_terms = {row.get("term") for row in _mysql.list_slang("active") if row.get("term")}
         except Exception as exc:
             logger.debug(f"Active slang lookup skipped: {exc}")
 
@@ -857,6 +947,7 @@ class AnalysisAgent:
             "risk_level": risk_level,
             "classification_method": state["classification_method"],
             "evidence_spans": evidence,
+            "similar_intel_ids": state.get("similar_intel_ids", []),
             "analysis_status": "CLASSIFIED",
         })
         state["analysis_id"] = analysis_id
@@ -886,8 +977,11 @@ class AnalysisAgent:
                     f"Slang candidate persist failed [{raw_id}:{candidate.get('term')}]: {exc}"
                 )
 
-        # MySQL: raw status
-        _mysql().update_raw_status(raw_id, "ANALYZED", clean_text=text, simhash=simhash_val)
+        # MySQL: raw status. Quick screening is not a final analysis; it
+        # remains upgradeable to standard analysis or graph expansion.
+        target_raw_status = self._target_raw_status(state)
+        _mysql().update_raw_status(raw_id, target_raw_status, clean_text=text, simhash=simhash_val)
+        state["raw_status"] = target_raw_status
 
         # MySQL: report
         if state.get("agent_summary"):
@@ -934,7 +1028,7 @@ class AnalysisAgent:
 
         # Milvus
         try:
-            if self._embed_fn:
+            if state.get("enable_embedding", False) and self._embed_fn:
                 vec = self._embed_fn(text)
                 text_hash = hashlib.md5(text.encode()).hexdigest()
                 from storage.milvus_store import milvus
@@ -1040,11 +1134,13 @@ class AnalysisAgent:
             "entities": state["entities"],
             "slang_terms": state["slang_terms"],
             "new_slang_candidates": state.get("new_slang_candidates", []),
+            "similar_intel_ids": state.get("similar_intel_ids", []),
             "graph_result": state["graph_result"],
             "agent_summary": state["agent_summary"],
             "disposal_advice": state["disposal_advice"],
             "tool_log": state["tool_log"],
             "analysis_id": state.get("analysis_id"),
+            "raw_status": state.get("raw_status") or "",
         }
 
     # ── Neo4j Sync ────────────────────────────────────────────────────────
@@ -1085,6 +1181,12 @@ class AnalysisAgent:
         model = SentenceTransformer(settings.embedding_model_name)
         self._embed_fn = lambda text: model.encode(text).tolist()
         logger.info("Embedding model loaded")
+
+    def _get_entity_extractor(self):
+        if self._entity_extractor is None:
+            from analyzer.entity_extractor import EntityExtractor
+            self._entity_extractor = EntityExtractor()
+        return self._entity_extractor
 
     @staticmethod
     def _tenacity_available() -> bool:

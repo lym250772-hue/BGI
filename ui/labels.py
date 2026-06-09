@@ -85,6 +85,7 @@ RAW_STATUS_LABELS = {
     "RAW_COLLECTED": "待研判",
     "CLEANED": "已清洗待研判",
     "ANALYZING": "研判中",
+    "SCREENED": "已初筛",
     "ANALYZED": "已研判",
     "FAILED": "研判失败",
     "DISCARDED": "已丢弃",

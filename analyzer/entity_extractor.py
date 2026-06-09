@@ -20,6 +20,9 @@ def _get_milvus():
 class EntityExtractor:
     """Extract key entities from intel text using rule-first cascade."""
 
+    VARIANT_CANDIDATE_LIMIT = 32
+    VARIANT_TEXT_LIMIT = 360
+
     # ------------------------------------------------------------------
     # L1: Regex patterns (zero cost, 100% precision)
     # ------------------------------------------------------------------
@@ -111,9 +114,8 @@ class EntityExtractor:
     def detect_slang_variants(self, text: str, embed_fn) -> list[dict]:
         """L3: Split text into n-grams, embed each, search Milvus for similar slangs."""
         results = []
-        # Split into 2~6 char windows
         words = self._extract_suspicious_ngrams(text)
-        for word in set(words):
+        for word in words[:self.VARIANT_CANDIDATE_LIMIT]:
             # Skip if already matched by dict
             if word in self._slang_dict:
                 continue
@@ -142,19 +144,51 @@ class EntityExtractor:
     def _extract_suspicious_ngrams(text: str) -> list[str]:
         """Extract candidate n-grams that could be slang (not plain common words)."""
         import jieba
+        text = (text or "")[:EntityExtractor.VARIANT_TEXT_LIMIT]
         tokens = list(jieba.cut(text))
         candidates = []
         for t in tokens:
             t = t.strip()
-            if len(t) >= 2 and len(t) <= 8:
-                # Prefer tokens that look "special": mixed alnum, unusual chars
+            if len(t) >= 2 and len(t) <= 8 and EntityExtractor._looks_like_slang_candidate(t):
                 candidates.append(t)
-        # Also add character-level n-grams for short combos
-        for i in range(len(text) - 1):
-            for n in (2, 3, 4):
-                if i + n <= len(text):
-                    candidates.append(text[i:i + n])
-        return candidates
+
+        # Character n-grams are useful for obfuscated slang, but they explode
+        # quickly. Only add a small backfill when tokenizer candidates are few.
+        if len(candidates) < 12:
+            for i in range(len(text) - 1):
+                for n in (2, 3):
+                    if i + n <= len(text):
+                        gram = text[i:i + n].strip()
+                        if EntityExtractor._looks_like_slang_candidate(gram):
+                            candidates.append(gram)
+                if len(candidates) >= EntityExtractor.VARIANT_CANDIDATE_LIMIT:
+                    break
+
+        seen = set()
+        unique = []
+        for item in candidates:
+            if item not in seen:
+                seen.add(item)
+                unique.append(item)
+        return unique
+
+    @staticmethod
+    def _looks_like_slang_candidate(value: str) -> bool:
+        """Keep only terms worth semantic slang lookup."""
+        if not value or value.isspace():
+            return False
+        if re.fullmatch(r"[\W_]+", value):
+            return False
+        if re.fullmatch(r"\d+", value):
+            return False
+        common = {
+            "这个", "那个", "可以", "没有", "就是", "因为", "所以", "如果", "我们",
+            "你们", "他们", "一个", "一些", "很多", "不是", "还是", "已经", "然后",
+            "但是", "起来", "什么", "自己", "平台", "用户", "内容", "问题", "回答",
+        }
+        if value in common:
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # L4: LLM structured extraction (last resort, for complex entities)
@@ -227,8 +261,8 @@ class EntityExtractor:
             "bank_card", "alipay", "telegram", "email", "crypto_wallet", "slang", "tool",
         }
         skip_llm = (
-            len(high_value_hit) >= 2
-            and classification_confidence >= 0.8
+            len(high_value_hit) >= 1
+            and classification_confidence >= 0.7
         )
 
         if skip_llm:

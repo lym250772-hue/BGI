@@ -7,6 +7,7 @@ import ui.labels as L
 import ui.theme as T
 from ui import data
 from ui.components import (
+    auto_refresh,
     empty_panel,
     job_status_badge,
     page_header,
@@ -18,6 +19,7 @@ from ui.components import (
 STATUS_OPTIONS = {
     "待研判": "RAW_COLLECTED",
     "已清洗待研判": "CLEANED",
+    "已初筛": "SCREENED",
     "研判失败": "FAILED",
     "已研判": "ANALYZED",
     "全部": None,
@@ -25,18 +27,46 @@ STATUS_OPTIONS = {
 
 MODE_OPTIONS = {
     "快速筛查": {
-        "desc": "规则和已有词典优先，关闭 LLM 与图谱扩线，适合批量初筛。",
-        "options": {"enable_llm": False, "enable_graph_expand": False, "enable_report": False},
+        "desc": "规则和已有词典优先，关闭 LLM、向量检索与图谱扩线；结果标记为已初筛，可继续升级标准研判。",
+        "options": {
+            "enable_llm": False,
+            "enable_roberta": False,
+            "enable_embedding": False,
+            "enable_graph_expand": False,
+            "enable_report": False,
+        },
     },
     "标准研判": {
-        "desc": "规则/NLP/LLM 协同，产出分类、实体、证据和风险评分。",
-        "options": {"enable_llm": True, "enable_graph_expand": False, "enable_report": False},
+        "desc": "规则/NLP/LLM 协同，关闭高成本向量扩展，产出分类、实体、证据和风险评分。",
+        "options": {
+            "enable_llm": True,
+            "enable_roberta": True,
+            "enable_embedding": False,
+            "enable_graph_expand": False,
+            "enable_report": False,
+        },
     },
     "扩线研判": {
-        "desc": "在标准研判基础上启用 Neo4j 扩线，适合账号、链接、联系方式明确的样本。",
-        "options": {"enable_llm": True, "enable_graph_expand": True, "enable_report": False},
+        "desc": "启用向量相似检索与 Neo4j 扩线；只对账号、链接、联系方式明确的样本有增量，否则会自动跳过扩线。",
+        "options": {
+            "enable_llm": True,
+            "enable_roberta": True,
+            "enable_embedding": True,
+            "enable_graph_expand": True,
+            "enable_report": False,
+        },
     },
 }
+
+
+def _query_int(name: str) -> int | None:
+    try:
+        value = st.query_params.get(name)
+        if isinstance(value, list):
+            value = value[0] if value else None
+        return int(value) if value else None
+    except Exception:
+        return None
 
 
 def _option_label(row: dict) -> str:
@@ -83,6 +113,36 @@ def _render_result(raw_id: int):
             )
     else:
         st.info("暂无证据片段，可能是未研判或降级路径未产出。")
+
+    st.markdown("### 历史相似情报")
+    similar_rows = result.get("similar_intel") or []
+    if similar_rows:
+        df = pd.DataFrame([
+            {
+                "情报ID": r.get("id"),
+                "相似度": (
+                    f"{float(r.get('similarity')):.2f}"
+                    if r.get("similarity") is not None else "-"
+                ),
+                "向量距离": (
+                    f"{float(r.get('distance')):.4f}"
+                    if r.get("distance") is not None else "-"
+                ),
+                "来源": r.get("source_platform") or "-",
+                "风险": (r.get("risk_label") or "未分类")
+                + (f" / {r.get('risk_sub_label')}" if r.get("risk_sub_label") else ""),
+                "风险分": (
+                    f"{float(r.get('risk_score')):.2f}"
+                    if r.get("risk_score") is not None else "-"
+                ),
+                "内容摘要": r.get("content_preview") or "",
+                "研判时间": str(r.get("analyzed_at") or r.get("collect_time") or "")[:19],
+            }
+            for r in similar_rows[:8]
+        ])
+        st.dataframe(df, hide_index=True, width="stretch")
+    else:
+        st.info("暂无历史相似情报。可能是首次出现、Milvus 暂无历史向量，或当前样本置信度较低导致相似检索被跳过。")
 
     left, right = st.columns([1.1, 1])
     with left:
@@ -131,7 +191,7 @@ def _jobs_table():
     rows = data.list_jobs(limit=12)
     if not rows:
         st.info("暂无后台任务。")
-        return
+        return []
     df = pd.DataFrame([
         {
             "任务ID": r.get("job_id"),
@@ -145,9 +205,41 @@ def _jobs_table():
         for r in rows
     ])
     st.dataframe(df, hide_index=True, width="stretch")
+    return rows
+
+
+def _render_pending_result(raw_id: int, selected: dict):
+    jobs = [j for j in data.list_jobs(limit=30) if int(j.get("raw_id") or 0) == int(raw_id)]
+    latest = jobs[0] if jobs else {}
+    status = L.raw_status_label(selected.get("raw_status"))
+    if latest:
+        status = L.job_status_label(latest.get("status"))
+    progress = latest.get("progress") if latest else 0
+    step = latest.get("current_step") or "-"
+    error = latest.get("error_message") or ""
+
+    st.markdown("### 当前研判状态")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("情报ID", f"#{raw_id}")
+    c2.metric("状态", status)
+    c3.metric("进度", f"{progress or 0}%")
+    st.markdown(
+        f"""
+        <div class='intel-card' style='margin-top:0.6rem'>
+          <div class='section-note'>当前步骤：{step}</div>
+          <div style='margin-top:0.4rem'>{selected.get('content_raw') or ''}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if error:
+        st.error(error)
+    else:
+        st.info("任务尚未完成。页面会在后台任务执行期间自动刷新。")
 
 
 def show():
+    data.recover_unfinished_jobs(limit=20)
     page_header(
         "Analysis Workbench",
         "研判工作台",
@@ -169,7 +261,9 @@ def show():
     if not rows:
         empty_panel("当前队列没有情报", "可以切换到其他队列，或等待搭档导入新的结构化数据。")
         st.markdown("### 后台任务")
-        _jobs_table()
+        job_rows = _jobs_table()
+        if any(j.get("status") in ("pending", "running") for j in job_rows):
+            auto_refresh(interval_ms=2500)
         return
 
     options = {_option_label(r): r["id"] for r in rows}
@@ -177,25 +271,24 @@ def show():
     raw_id = int(options[selected_label])
     selected = next(r for r in rows if int(r["id"]) == raw_id)
 
-    top_left, top_right = st.columns([1.15, 0.85])
-    with top_left:
-        st.markdown(
-            f"""
-            <div class='intel-card'>
-              <div style='display:flex;gap:8px;align-items:center;margin-bottom:8px'>
-                {raw_status_badge(selected.get('raw_status'))}
-                <span class='mono' style='color:{T.MUTED}'>#{raw_id}</span>
-                <span style='color:{T.MUTED}'>{selected.get('source_platform') or '-'}</span>
-              </div>
-              <div>{selected.get('content_raw') or ''}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with top_right:
-        st.markdown("<div class='bagi-panel'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>提交后台研判</div>", unsafe_allow_html=True)
-        st.caption("不会阻塞页面。提交后可以继续切换其他情报。")
+    st.markdown(
+        f"""
+        <div class='intel-card'>
+          <div style='display:flex;gap:8px;align-items:center;margin-bottom:8px'>
+            {raw_status_badge(selected.get('raw_status'))}
+            <span class='mono' style='color:{T.MUTED}'>#{raw_id}</span>
+            <span style='color:{T.MUTED}'>{selected.get('source_platform') or '-'}</span>
+          </div>
+          <div>{selected.get('content_raw') or ''}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    submit_left, submit_right = st.columns([2, 1])
+    with submit_left:
+        st.caption("提交后台任务后可以继续切换其他情报；任务完成后结果会自动写回。")
+    with submit_right:
         if st.button("提交研判任务", type="primary", width="stretch", key="submit_job"):
             text = data.preferred_text(raw_id, fallback=selected.get("content_raw") or "")
             job_id = data.submit_analysis_job(
@@ -204,16 +297,40 @@ def show():
                 platform=selected.get("source_platform") or "unknown",
                 options={**mode["options"], "analysis_mode": mode_label},
             )
+            st.session_state.wb_active_raw_id = raw_id
+            st.session_state.wb_last_job_id = job_id
+            try:
+                st.query_params["page"] = "workbench"
+                st.query_params["result_raw_id"] = str(raw_id)
+            except Exception:
+                pass
             st.success(f"已提交任务：{job_id}")
             st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
     tab_result, tab_jobs = st.tabs(["研判结果", "后台任务"])
     with tab_result:
-        if selected.get("risk_label") or selected.get("raw_status") == "ANALYZED":
-            _render_result(raw_id)
+        active_raw_id = int(
+            _query_int("result_raw_id")
+            or st.session_state.get("wb_active_raw_id")
+            or raw_id
+        )
+        active_raw = data.get_raw(active_raw_id) or {}
+        active_status = active_raw.get("raw_status") or (
+            selected.get("raw_status") if active_raw_id == raw_id else ""
+        )
+        if active_status in ("SCREENED", "ANALYZED", "FAILED"):
+            if active_raw.get("raw_status") == "FAILED":
+                meta = active_raw.get("metadata") or {}
+                if isinstance(meta, str):
+                    meta = {}
+                st.error(meta.get("last_error", "研判失败，请查看后台任务错误。"))
+            else:
+                _render_result(active_raw_id)
         else:
-            empty_panel("尚未完成研判", "提交后台任务后，任务完成会自动写回 MySQL、Neo4j、Milvus 和 Doris。")
+            _render_pending_result(active_raw_id, selected if active_raw_id == raw_id else active_raw)
     with tab_jobs:
-        _jobs_table()
+        job_rows = _jobs_table()
+
+    if data.has_active_jobs():
+        auto_refresh(interval_ms=2500)

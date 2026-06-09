@@ -6,7 +6,7 @@ import streamlit as st
 import ui.labels as L
 import ui.theme as T
 from ui import data
-from ui.components import page_header, raw_status_badge, risk_badge, service_strip
+from ui.components import auto_refresh, page_header, raw_status_badge, risk_badge, service_strip
 
 
 QUICK_QUESTIONS = [
@@ -27,6 +27,7 @@ def _recent_table(rows: list[dict]) -> pd.DataFrame:
             "处理状态": L.raw_status_label(r.get("raw_status")),
             "风险类型": r.get("risk_label") or "未分类",
             "风险等级": L.risk_level_label(r.get("risk_level") or ""),
+            "研判时间": str(r.get("analyzed_at") or "")[:19] or "-",
             "接收时间": str(r.get("collect_time") or "")[:19],
         }
         for r in rows
@@ -97,6 +98,7 @@ def _chatbi_panel():
 
 
 def show():
+    data.recover_unfinished_jobs(limit=20)
     page_header(
         "Command Center",
         "BGI 情报研判控制台",
@@ -107,10 +109,10 @@ def show():
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("接收总量", stats["total_raw"])
     c2.metric("待研判", stats["pending"])
-    c3.metric("研判中", stats["running"])
-    c4.metric("已研判", stats["analyzed"])
-    c5.metric("高危情报", stats["high_risk"])
-    c6.metric("候选黑话", stats["slang_candidates"])
+    c3.metric("已初筛", stats.get("screened", 0))
+    c4.metric("研判中", stats["running"])
+    c5.metric("已研判", stats["analyzed"])
+    c6.metric("高危情报", stats["high_risk"])
 
     left, right = st.columns([1.25, 1])
     with left:
@@ -129,7 +131,7 @@ def show():
             df["dt"] = pd.to_datetime(df["dt"])
             st.line_chart(df.set_index("dt")[["cnt", "high_cnt"]], width="stretch")
         else:
-            st.info("暂无近 7 日趋势数据；这通常表示样本时间不在最近 7 天内。")
+            st.info("暂无近 7 日研判完成数据。")
 
     with right:
         st.markdown("### 处理状态")
@@ -164,7 +166,7 @@ def show():
     st.divider()
 
     st.markdown("### 近期情报")
-    recent = data.list_intel(limit=12)
+    recent = data.list_intel(limit=12, order_by="recent_activity")
     if recent:
         st.dataframe(_recent_table(recent), hide_index=True, width="stretch")
         top = recent[0]
@@ -190,3 +192,6 @@ def show():
     st.divider()
     st.markdown("### 连接状态")
     service_strip(compact=True)
+
+    if data.has_active_jobs():
+        auto_refresh(interval_ms=2500)

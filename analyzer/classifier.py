@@ -137,9 +137,32 @@ class IntentClassifier:
         model_path = Path(settings.roberta_model_path) if settings.roberta_model_path else None
         if model_path and model_path.exists():
             try:
-                from transformers import pipeline
-                self._roberta = pipeline("text-classification", model=str(model_path))
-                logger.info("RoBERTa classifier loaded")
+                from transformers import AutoModelForSequenceClassification, AutoTokenizer
+                tokenizer = AutoTokenizer.from_pretrained(
+                    str(model_path),
+                    model_max_length=512,
+                    truncation_side="right",
+                )
+                model = AutoModelForSequenceClassification.from_pretrained(str(model_path))
+                device = "cpu"
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        device = "cuda"
+                except Exception:
+                    device = "cpu"
+                try:
+                    model.to(device)
+                except Exception:
+                    device = "cpu"
+                    model.to(device)
+                model.eval()
+                self._roberta = {
+                    "model": model,
+                    "tokenizer": tokenizer,
+                    "device": device,
+                }
+                logger.info(f"RoBERTa classifier loaded on {device}")
             except Exception as exc:
                 logger.warning(f"RoBERTa load failed: {exc}, using stub")
                 self._roberta = self._stub_predict
@@ -155,7 +178,50 @@ class IntentClassifier:
 
     def classify_roberta(self, text: str) -> tuple[str, str, float] | None:
         """L2 classification via fine-tuned RoBERTa (7 main categories)."""
-        result = self.roberta(text)
+        loaded = self.roberta
+        if loaded is None:
+            return None
+        if callable(loaded):
+            return self._classify_roberta_pipeline(text, loaded)
+
+        try:
+            import torch
+            model = loaded["model"]
+            tokenizer = loaded["tokenizer"]
+            device = loaded["device"]
+            max_positions = int(getattr(model.config, "max_position_embeddings", 512) or 512)
+            tokenizer_max = int(getattr(tokenizer, "model_max_length", 512) or 512)
+            max_len = max(8, min(512, max_positions, tokenizer_max))
+            encoded = tokenizer(
+                text or "",
+                return_tensors="pt",
+                truncation=True,
+                max_length=max_len,
+                padding=False,
+            )
+            encoded = {k: v.to(device) for k, v in encoded.items()}
+            with torch.no_grad():
+                logits = model(**encoded).logits
+                probs = torch.softmax(logits, dim=-1)[0]
+                score_tensor, idx_tensor = torch.max(probs, dim=0)
+            idx = int(idx_tensor.item())
+            score = float(score_tensor.item())
+            label = model.config.id2label.get(idx, str(idx))
+        except Exception as exc:
+            logger.warning(f"RoBERTa classify failed, falling back to next layer: {exc}")
+            return None
+
+        if score < settings.classification_confidence_threshold:
+            return None
+        return label, "", score
+
+    def _classify_roberta_pipeline(self, text: str, pipe) -> tuple[str, str, float] | None:
+        """Compatibility path for tests or legacy pipeline instances."""
+        try:
+            result = pipe(text, truncation=True, max_length=512, padding=False)
+        except Exception as exc:
+            logger.warning(f"RoBERTa pipeline classify failed, falling back to next layer: {exc}")
+            return None
         if result is None:
             return None
         if isinstance(result, list):
@@ -222,11 +288,13 @@ class IntentClassifier:
     # Cascade entry point
     # ------------------------------------------------------------------
 
-    def classify(self, text: str, skip_llm: bool = False) -> dict:
+    def classify(self, text: str, skip_llm: bool = False, skip_roberta: bool = False) -> dict:
         """Run the full cascade: L1 → L2 → L3.
 
         When skip_llm=True (degraded mode), skips LLM and returns best
         available result from L1/L2, or a low-confidence default.
+        When skip_roberta=True, L2 is skipped as well; this is used by the
+        UI "快速筛查" mode to avoid cold-loading the local classifier.
 
         Returns dict with keys: intent_label, sub_label, confidence, method.
         """
@@ -238,11 +306,12 @@ class IntentClassifier:
                     "method": ClassificationMethod.KEYWORD}
 
         # L2
-        result = self.classify_roberta(text)
-        if result:
-            label, sub, conf = result
-            return {"intent_label": label, "sub_label": sub, "confidence": conf,
-                    "method": ClassificationMethod.ROBERTA}
+        if not skip_roberta:
+            result = self.classify_roberta(text)
+            if result:
+                label, sub, conf = result
+                return {"intent_label": label, "sub_label": sub, "confidence": conf,
+                        "method": ClassificationMethod.ROBERTA}
 
         # L3 — skip if circuit breaker is open or explicitly degraded
         if skip_llm:

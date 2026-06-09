@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+import ui.labels as L
+
 
 def _truncate(value: str | None, limit: int = 120) -> str:
     text = (value or "").replace("\n", " ").strip()
@@ -123,13 +125,31 @@ def overview_stats() -> dict:
             candidates = c.fetchone()["cnt"]
             c.execute("SELECT COUNT(*) AS cnt FROM analysis_job WHERE status IN ('pending','running')")
             active_jobs = c.fetchone()["cnt"]
+            c.execute(
+                """SELECT COUNT(*) AS cnt
+                   FROM dwd_intel_analysis
+                   WHERE is_latest=1
+                     AND DATE(DATE_ADD(created_at, INTERVAL 8 HOUR)) =
+                         DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR))"""
+            )
+            today_analyzed = c.fetchone()["cnt"]
+            c.execute(
+                """SELECT COUNT(*) AS cnt
+                   FROM ods_raw_intel
+                   WHERE DATE(DATE_ADD(collect_time, INTERVAL 8 HOUR)) =
+                         DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR))"""
+            )
+            today_received = c.fetchone()["cnt"]
         return {
             "status_counts": status_counts,
             "total_raw": sum(status_counts.values()),
             "pending": status_counts.get("RAW_COLLECTED", 0) + status_counts.get("CLEANED", 0),
             "running": status_counts.get("ANALYZING", 0),
+            "screened": status_counts.get("SCREENED", 0),
             "analyzed": status_counts.get("ANALYZED", 0),
             "failed": status_counts.get("FAILED", 0),
+            "today_analyzed": today_analyzed,
+            "today_received": today_received,
             "high_risk": high,
             "entities": entities,
             "slang_candidates": candidates,
@@ -141,8 +161,11 @@ def overview_stats() -> dict:
             "total_raw": 0,
             "pending": 0,
             "running": 0,
+            "screened": 0,
             "analyzed": 0,
             "failed": 0,
+            "today_analyzed": 0,
+            "today_received": 0,
             "high_risk": 0,
             "entities": 0,
             "slang_candidates": 0,
@@ -183,22 +206,17 @@ def platform_distribution() -> list[dict]:
 
 def daily_trend(days: int = 7) -> list[dict]:
     try:
-        from storage.doris_store import doris
-        if doris.healthcheck():
-            return [dict(r) for r in doris.daily_trend(days=days)]
-    except Exception:
-        pass
-    try:
         from storage.mysql_store import mysql
         with mysql.cursor() as c:
             c.execute(
-                """SELECT DATE(o.collect_time) AS dt,
-                          COUNT(a.id) AS cnt,
-                          SUM(CASE WHEN a.risk_level IN ('high','critical') THEN 1 ELSE 0 END) AS high_cnt
-                   FROM ods_raw_intel o
-                   LEFT JOIN dwd_intel_analysis a ON a.raw_id=o.id AND a.is_latest=1
-                   WHERE o.collect_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
-                   GROUP BY DATE(o.collect_time)
+                """SELECT DATE(DATE_ADD(created_at, INTERVAL 8 HOUR)) AS dt,
+                          COUNT(*) AS cnt,
+                          SUM(CASE WHEN risk_level IN ('high','critical') THEN 1 ELSE 0 END) AS high_cnt
+                   FROM dwd_intel_analysis
+                   WHERE is_latest=1
+                     AND DATE(DATE_ADD(created_at, INTERVAL 8 HOUR)) >=
+                         DATE_SUB(DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR)), INTERVAL %s DAY)
+                   GROUP BY DATE(DATE_ADD(created_at, INTERVAL 8 HOUR))
                    ORDER BY dt""",
                 (days,),
             )
@@ -519,7 +537,8 @@ def _chatbi_queue_status() -> dict:
     ]
     answer = (
         f"当前接收总量 {stats['total_raw']} 条；待研判 {stats['pending']} 条，"
-        f"研判中 {stats['running']} 条，已研判 {stats['analyzed']} 条，失败 {stats['failed']} 条。"
+        f"研判中 {stats['running']} 条，已初筛 {stats.get('screened', 0)} 条，"
+        f"已研判 {stats['analyzed']} 条，失败 {stats['failed']} 条。"
     )
     return {
         "intent": "处理队列状态",
@@ -627,7 +646,12 @@ def chatbi_answer(question: str) -> dict:
     return result
 
 
-def list_intel(status: str | None = None, keyword: str = "", limit: int = 200) -> list[dict]:
+def list_intel(
+    status: str | None = None,
+    keyword: str = "",
+    limit: int = 200,
+    order_by: str = "id_desc",
+) -> list[dict]:
     where = []
     params = []
     if status:
@@ -638,6 +662,9 @@ def list_intel(status: str | None = None, keyword: str = "", limit: int = 200) -
         like = f"%{keyword}%"
         params.extend([like, like, like])
     clause = "WHERE " + " AND ".join(where) if where else ""
+    order_sql = "o.id DESC"
+    if order_by == "recent_activity":
+        order_sql = "COALESCE(a.created_at, o.collect_time) DESC, o.id DESC"
     params.append(limit)
     try:
         from storage.mysql_store import mysql
@@ -647,11 +674,12 @@ def list_intel(status: str | None = None, keyword: str = "", limit: int = 200) -
                 SELECT o.id, o.source_platform, o.source_channel, o.author_name,
                        o.content_raw, o.raw_status, o.collect_time,
                        a.risk_label, a.risk_sub_label, a.risk_score, a.risk_level,
-                       a.classification_method
+                       a.classification_method,
+                       DATE_ADD(a.created_at, INTERVAL 8 HOUR) AS analyzed_at
                 FROM ods_raw_intel o
                 LEFT JOIN dwd_intel_analysis a ON a.raw_id=o.id AND a.is_latest=1
                 {clause}
-                ORDER BY o.id DESC
+                ORDER BY {order_sql}
                 LIMIT %s
                 """,
                 params,
@@ -693,6 +721,9 @@ def submit_analysis_job(raw_id: int, text: str, platform: str, options: dict | N
     from analyzer.worker import submit_analysis
 
     job_id = mysql.create_job(raw_id, text, platform, options=options)
+    # Mark synchronously so the item disappears from "submittable" queues
+    # immediately, even before the background worker takes its first step.
+    mysql.mark_raw_analyzing(raw_id)
     submit_analysis(job_id, raw_id, text, platform, options=options)
     return job_id
 
@@ -719,6 +750,26 @@ def list_jobs(limit: int = 20) -> list[dict]:
         return mysql.list_jobs(limit=limit)
     except Exception:
         return []
+
+
+def recover_unfinished_jobs(limit: int = 20) -> int:
+    try:
+        from analyzer.worker import recover_unfinished_jobs as recover
+        return recover(limit=limit)
+    except Exception:
+        return 0
+
+
+def has_active_jobs() -> bool:
+    try:
+        from storage.mysql_store import mysql
+        with mysql.cursor() as c:
+            c.execute(
+                "SELECT COUNT(*) AS cnt FROM analysis_job WHERE status IN ('pending','running')"
+            )
+            return int(c.fetchone()["cnt"] or 0) > 0
+    except Exception:
+        return False
 
 
 def list_entities(limit: int = 300, entity_type: str | None = None) -> list[dict]:
@@ -800,6 +851,7 @@ def graph_neighbors(entity_type: str, value: str, depth: int = 2) -> list[dict]:
         return []
 
     output = []
+    seen = set()
     for row in rows:
         related = row.get("related")
         try:
@@ -809,10 +861,28 @@ def graph_neighbors(entity_type: str, value: str, depth: int = 2) -> list[dict]:
             labels = []
             props = {}
         rels = row.get("rels") or []
+        label_set = set(labels)
+        rel_name = "-"
+        if rels:
+            try:
+                rel_name = rels[-1].type
+            except Exception:
+                rel_name = "-"
+        if "Intel" in label_set:
+            continue
+
+        raw_type = props.get("type") or (labels[0] if labels else "-")
+        clue_type = L.entity_type_label(raw_type)
+        clue_value = props.get("value") or props.get("uuid") or "-"
+        unique_key = (",".join(labels), str(clue_type), str(clue_value), len(rels), rel_name)
+        if unique_key in seen:
+            continue
+        seen.add(unique_key)
         output.append({
-            "节点标签": ",".join(labels) or "-",
-            "线索类型": props.get("type", "-"),
-            "线索值": props.get("value", props.get("uuid", "-")),
+            "图谱标签": ",".join(labels) or "-",
+            "关系类型": rel_name,
+            "线索类型": clue_type,
+            "线索值": clue_value,
             "关系跳数": len(rels),
         })
     return output

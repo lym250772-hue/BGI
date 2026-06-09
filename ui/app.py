@@ -32,6 +32,20 @@ PAGES = {
 }
 
 
+def _initial_page() -> str:
+    """Read page key from URL first, then session state."""
+    try:
+        page = st.query_params.get("page")
+        if isinstance(page, list):
+            page = page[0] if page else None
+        if page in PAGES:
+            return page
+    except Exception:
+        pass
+    page = st.session_state.get("nav_page", "overview")
+    return page if page in PAGES else "overview"
+
+
 def _sidebar():
     with st.sidebar:
         st.markdown(
@@ -46,9 +60,10 @@ def _sidebar():
 
         keys = list(PAGES.keys())
         labels = [PAGES[k][0] for k in keys]
-        current = st.session_state.get("nav_page", "overview")
+        current = _initial_page()
         if current not in keys:
             current = "overview"
+        st.session_state.nav_page = current
 
         selected = st.radio(
             "导航",
@@ -59,20 +74,30 @@ def _sidebar():
         selected_key = keys[labels.index(selected)]
         if selected_key != current:
             st.session_state.nav_page = selected_key
+            try:
+                st.query_params["page"] = selected_key
+            except Exception:
+                pass
             st.rerun()
 
         st.markdown(
             f"""
-            <div style='position:fixed;bottom:0.8rem;left:0.8rem;right:0.8rem;
-                        border-top:1px solid #25313E;padding-top:0.6rem;
-                        font-size:0.68rem;color:#7F8D99'>
-              v0.5 Console<br>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            <div class='sidebar-footer'>
+              <div style='border-top:1px solid #25313E;padding-top:0.6rem;
+                          font-size:0.68rem;color:#7F8D99'>
+                v0.5 Console
+              </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
 
+try:
+    st.query_params["page"] = _initial_page()
+except Exception:
+    pass
+
 _sidebar()
-page_key = st.session_state.get("nav_page", "overview")
+page_key = _initial_page()
 PAGES.get(page_key, PAGES["overview"])[1]()

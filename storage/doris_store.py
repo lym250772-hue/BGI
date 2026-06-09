@@ -216,6 +216,9 @@ class DorisStore:
         disposal_advice = record.get("disposal_advice", [])
         graph_result = record.get("graph_result", {})
 
+        def trunc(value, max_bytes: int) -> str:
+            return self._truncate_utf8(value, max_bytes)
+
         sql = f"""
         INSERT INTO {settings.doris_database}.intel_analysis_wide
             (raw_id, platform, collect_time, risk_label, risk_sub_label,
@@ -248,22 +251,34 @@ class DorisStore:
                 entity_types.get("tool", 0),
                 1 if record.get("is_gang_related") else 0,
                 len(disposal_advice),
-                (record.get("clean_text", "") or "")[:200],
-                (record.get("source_url", "") or "")[:1024],
-                (record.get("author_id", "") or "")[:128],
-                (record.get("source_channel", "") or "")[:128],
-                (record.get("clean_text", "") or "")[:500],
-                _json.dumps([{"type": e.get("entity_type", ""), "value": e.get("entity_value", "")}
-                             for e in entities[:20]], ensure_ascii=False)[:2000],
-                _json.dumps([{"term": s.get("term", ""), "meaning": s.get("meaning", "")}
-                             for s in (slang_terms if isinstance(slang_terms, list) else [])[:10]],
-                            ensure_ascii=False)[:1000],
-                _json.dumps(evidence_spans[:10], ensure_ascii=False)[:2000],
-                (record.get("agent_summary", "") or "")[:500],
-                _json.dumps(disposal_advice[:5], ensure_ascii=False)[:500],
-                _json.dumps(graph_result, ensure_ascii=False)[:1000],
+                trunc(record.get("clean_text", ""), 200),
+                trunc(record.get("source_url", ""), 1024),
+                trunc(record.get("author_id", ""), 128),
+                trunc(record.get("source_channel", ""), 128),
+                trunc(record.get("clean_text", ""), 500),
+                trunc(_json.dumps([
+                    {"type": e.get("entity_type", ""), "value": e.get("entity_value", "")}
+                    for e in entities[:20]
+                ], ensure_ascii=False), 2000),
+                trunc(_json.dumps([
+                    {"term": s.get("term", ""), "meaning": s.get("meaning", "")}
+                    for s in (slang_terms if isinstance(slang_terms, list) else [])[:10]
+                ], ensure_ascii=False), 1000),
+                trunc(_json.dumps(evidence_spans[:10], ensure_ascii=False), 2000),
+                trunc(record.get("agent_summary", ""), 500),
+                trunc(_json.dumps(disposal_advice[:5], ensure_ascii=False), 500),
+                trunc(_json.dumps(graph_result, ensure_ascii=False), 1000),
             ))
         logger.debug(f"Doris insert raw_id={record.get('raw_id')}")
+
+    @staticmethod
+    def _truncate_utf8(value, max_bytes: int) -> str:
+        """Truncate by UTF-8 bytes for Doris VARCHAR byte limits."""
+        text = "" if value is None else str(value)
+        raw = text.encode("utf-8")
+        if len(raw) <= max_bytes:
+            return text
+        return raw[:max_bytes].decode("utf-8", errors="ignore")
 
     # ── Dashboard Queries ──────────────────────────────────────────────
 

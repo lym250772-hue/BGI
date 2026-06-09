@@ -46,22 +46,37 @@ def _options_from_mode(args) -> dict:
     if args.fast:
         return {
             "enable_llm": False,
+            "enable_roberta": False,
             "enable_embedding": False,
             "enable_graph_expand": False,
             "enable_report": False,
+            "analysis_mode": "快速筛查",
+        }
+    if args.standard:
+        return {
+            "enable_llm": True,
+            "enable_roberta": True,
+            "enable_embedding": False,
+            "enable_graph_expand": False,
+            "enable_report": False,
+            "analysis_mode": "标准研判",
         }
     if args.expand:
         return {
             "enable_llm": True,
+            "enable_roberta": True,
             "enable_embedding": not args.no_embedding,
             "enable_graph_expand": True,
             "enable_report": False,
+            "analysis_mode": "扩线研判",
         }
     return {
         "enable_llm": not args.no_llm,
+        "enable_roberta": True,
         "enable_embedding": not args.no_embedding,
         "enable_graph_expand": args.graph,
         "enable_report": args.report,
+        "analysis_mode": "自定义研判",
     }
 
 
@@ -143,6 +158,8 @@ def main() -> int:
             enable_report=options["enable_report"],
             enable_llm=options["enable_llm"],
             enable_embedding=options["enable_embedding"],
+            enable_roberta=options["enable_roberta"],
+            analysis_mode=options["analysis_mode"],
         ):
             step = event.get("step", "unknown")
             status = event.get("status", "")

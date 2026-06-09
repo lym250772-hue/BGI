@@ -5,6 +5,7 @@ For production, replace with Celery + Redis or a dedicated task queue.
 """
 
 import threading
+import json
 from concurrent.futures import ThreadPoolExecutor, Future
 from loguru import logger
 
@@ -12,6 +13,21 @@ _MAX_WORKERS = 5
 _executor: ThreadPoolExecutor | None = None
 _lock = threading.Lock()
 _active_futures: dict[str, Future] = {}
+
+
+def _business_status_from_options(options: dict | None) -> str:
+    """Map analysis options to the raw intelligence business status."""
+    opts = options or {}
+    mode = str(opts.get("analysis_mode") or "")
+    fast_flags = (
+        not opts.get("enable_llm", True)
+        and not opts.get("enable_roberta", True)
+        and not opts.get("enable_embedding", False)
+        and not opts.get("enable_graph_expand", True)
+    )
+    if "快速" in mode or fast_flags:
+        return "SCREENED"
+    return "ANALYZED"
 
 
 def _get_executor() -> ThreadPoolExecutor:
@@ -48,6 +64,9 @@ def submit_analysis(job_id: str, raw_id: int, text: str, platform: str = "unknow
             enable_graph_opt = opts.get("enable_graph_expand", enable_graph)
             enable_report_opt = opts.get("enable_report", enable_report)
             enable_llm = opts.get("enable_llm", True)
+            enable_embedding = opts.get("enable_embedding", False)
+            enable_roberta = opts.get("enable_roberta", True)
+            analysis_mode = opts.get("analysis_mode", "")
             final_result = None
             for step in engine.run_stream(
                 raw_data_id=raw_id,
@@ -56,6 +75,9 @@ def submit_analysis(job_id: str, raw_id: int, text: str, platform: str = "unknow
                 enable_graph_expand=enable_graph_opt,
                 enable_report=enable_report_opt,
                 enable_llm=enable_llm,
+                enable_embedding=enable_embedding,
+                enable_roberta=enable_roberta,
+                analysis_mode=analysis_mode,
             ):
                 step_name = step.get("step", "")
                 progress, label = _STEP_PROGRESS.get(step_name, (None, step_name))
@@ -69,7 +91,8 @@ def submit_analysis(job_id: str, raw_id: int, text: str, platform: str = "unknow
             if not final_result:
                 raise RuntimeError("analysis stream finished without final result")
 
-            mysql.update_raw_status(raw_id, "ANALYZED")
+            target_status = final_result.get("raw_status") or _business_status_from_options(opts)
+            mysql.update_raw_status(raw_id, target_status)
             mysql.update_job_status(job_id, status="success", progress=100,
                                     current_step="done",
                                     result_analysis_id=final_result.get("analysis_id"))
@@ -84,6 +107,47 @@ def submit_analysis(job_id: str, raw_id: int, text: str, platform: str = "unknow
     with _lock:
         _active_futures[job_id] = future
     return job_id
+
+
+def _job_is_active(job_id: str) -> bool:
+    with _lock:
+        future = _active_futures.get(job_id)
+        # Treat a known future as owned by this process even if it has just
+        # completed; the worker may still be flushing the final DB status.
+        return future is not None
+
+
+def recover_unfinished_jobs(limit: int = 20) -> int:
+    """Attach DB-persisted unfinished jobs to the current worker process.
+
+    The MVP queue is an in-process ThreadPoolExecutor. If Streamlit restarts,
+    MySQL still has pending/running rows, but the old threads are gone. This
+    recovery hook makes page refreshes and app restarts pick those jobs back up.
+    """
+    from storage.mysql_store import mysql
+
+    recovered = 0
+    for job in mysql.list_unfinished_jobs(limit=limit):
+        job_id = job.get("job_id")
+        if not job_id or _job_is_active(job_id):
+            continue
+        options = job.get("options")
+        if isinstance(options, str) and options:
+            try:
+                options = json.loads(options)
+            except Exception:
+                options = None
+        submit_analysis(
+            job_id=job_id,
+            raw_id=int(job.get("raw_id") or 0),
+            text=job.get("input_text") or "",
+            platform=job.get("platform") or "unknown",
+            options=options if isinstance(options, dict) else None,
+        )
+        recovered += 1
+    if recovered:
+        logger.info(f"Recovered {recovered} unfinished analysis jobs")
+    return recovered
 
 
 def batch_submit(items: list[dict], platform: str = "unknown") -> list[str]:

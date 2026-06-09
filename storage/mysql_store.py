@@ -25,6 +25,7 @@ RAW_STATUSES = {
     "RAW_COLLECTED",
     "CLEANED",
     "ANALYZING",
+    "SCREENED",
     "ANALYZED",
     "FAILED",
     "DISCARDED",
@@ -146,6 +147,7 @@ class MySQLStore:
             risk_level VARCHAR(16),
             classification_method VARCHAR(64),
             evidence_spans JSON,
+            similar_intel_ids JSON,
             analysis_status VARCHAR(32) DEFAULT 'CLASSIFIED',
             version INT DEFAULT 1,
             is_latest TINYINT DEFAULT 1,
@@ -329,6 +331,7 @@ class MySQLStore:
             ("agent_report", "training_sample", "ALTER TABLE agent_report ADD COLUMN training_sample JSON"),
             ("dwd_intel_analysis", "version", "ALTER TABLE dwd_intel_analysis ADD COLUMN version INT DEFAULT 1"),
             ("dwd_intel_analysis", "is_latest", "ALTER TABLE dwd_intel_analysis ADD COLUMN is_latest TINYINT DEFAULT 1"),
+            ("dwd_intel_analysis", "similar_intel_ids", "ALTER TABLE dwd_intel_analysis ADD COLUMN similar_intel_ids JSON COMMENT '历史相似情报ID与相似度JSON'"),
             ("dim_slang_dict", "candidate_raw_id", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_raw_id BIGINT COMMENT '首次发现该候选黑话的原始情报ID'"),
             ("dim_slang_dict", "candidate_evidence", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_evidence TEXT COMMENT '触发候选判断的原文证据片段'"),
             ("dim_slang_dict", "candidate_reason", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_reason TEXT COMMENT '模型判断为疑似黑话的原因'"),
@@ -426,6 +429,7 @@ class MySQLStore:
             "ALTER TABLE dwd_intel_analysis MODIFY COLUMN risk_level VARCHAR(16) COMMENT '风险等级：low、normal、high、critical'",
             "ALTER TABLE dwd_intel_analysis MODIFY COLUMN classification_method VARCHAR(64) COMMENT '分类来源：keyword、roberta、llm、degraded'",
             "ALTER TABLE dwd_intel_analysis MODIFY COLUMN evidence_spans JSON COMMENT '风险证据片段JSON'",
+            "ALTER TABLE dwd_intel_analysis MODIFY COLUMN similar_intel_ids JSON COMMENT '历史相似情报ID与相似度JSON'",
             "ALTER TABLE dwd_intel_analysis MODIFY COLUMN analysis_status VARCHAR(32) DEFAULT 'CLASSIFIED' COMMENT '研判状态'",
             "ALTER TABLE dwd_intel_analysis MODIFY COLUMN version INT DEFAULT 1 COMMENT '同一情报的研判版本号'",
             "ALTER TABLE dwd_intel_analysis MODIFY COLUMN is_latest TINYINT DEFAULT 1 COMMENT '是否为最新研判结果'",
@@ -465,7 +469,7 @@ class MySQLStore:
             "ALTER TABLE ods_raw_intel MODIFY COLUMN raw_status VARCHAR(32) "
             "DEFAULT 'RAW_COLLECTED' COMMENT "
             "'处理状态：RAW_COLLECTED待研判、CLEANED已清洗、"
-            "ANALYZING研判中、ANALYZED已研判、FAILED研判失败、DISCARDED已丢弃'"
+            "ANALYZING研判中、SCREENED已初筛、ANALYZED已研判、FAILED研判失败、DISCARDED已丢弃'"
         )
         with self.cursor() as c:
             for table, comment in table_comments:
@@ -529,6 +533,8 @@ class MySQLStore:
             "cleaned": "CLEANED",
             "running": "ANALYZING",
             "analyzing": "ANALYZING",
+            "screened": "SCREENED",
+            "initial_screened": "SCREENED",
             "success": "ANALYZED",
             "analyzed": "ANALYZED",
             "failed": "FAILED",
@@ -702,6 +708,12 @@ class MySQLStore:
                 result["evidence_spans"] = _json.dumps(val, ensure_ascii=False)
         else:
             result["evidence_spans"] = "[]"
+        if "similar_intel_ids" in result:
+            val = result["similar_intel_ids"]
+            if not isinstance(val, str):
+                result["similar_intel_ids"] = _json.dumps(val, ensure_ascii=False)
+        else:
+            result["similar_intel_ids"] = "[]"
 
         raw_id = result["raw_id"]
 
@@ -725,14 +737,24 @@ class MySQLStore:
             # Insert new version
             sql = """INSERT INTO dwd_intel_analysis
                 (raw_id, clean_id, risk_label, risk_sub_label, risk_score, risk_level,
-                 classification_method, evidence_spans, analysis_status,
+                 classification_method, evidence_spans, similar_intel_ids, analysis_status,
                  version, is_latest)
             VALUES (%(raw_id)s, %(clean_id)s, %(risk_label)s, %(risk_sub_label)s,
                     %(risk_score)s, %(risk_level)s, %(classification_method)s,
-                    %(evidence_spans)s, %(analysis_status)s,
+                    %(evidence_spans)s, %(similar_intel_ids)s, %(analysis_status)s,
                     %(version)s, 1)"""
             result["version"] = next_ver
-            c.execute(sql, result)
+            try:
+                c.execute(sql, result)
+            except pymysql.err.OperationalError as exc:
+                if exc.args and exc.args[0] == 1054 and "similar_intel_ids" in str(exc):
+                    c.execute(
+                        "ALTER TABLE dwd_intel_analysis "
+                        "ADD COLUMN similar_intel_ids JSON COMMENT '历史相似情报ID与相似度JSON'"
+                    )
+                    c.execute(sql, result)
+                else:
+                    raise
             analysis_id = c.lastrowid
             logger.info(f"Analysis saved: raw_id={raw_id} version={next_ver}")
             return analysis_id
@@ -745,6 +767,68 @@ class MySQLStore:
                 (raw_id,),
             )
             return c.fetchall()
+
+    @staticmethod
+    def _similar_raw_id(entry) -> int | None:
+        """Extract raw_id from a similar-intel entry.
+
+        Accepts both the new shape:
+            {"raw_id": 123, "similarity": 0.91, "distance": 0.09}
+        and the old shape:
+            123
+        """
+        if isinstance(entry, dict):
+            value = entry.get("raw_id") or entry.get("raw_data_id")
+        else:
+            value = entry
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def list_similar_intel_details(self, similar_entries: list) -> list[dict]:
+        """Load UI-friendly summaries for similar historical intel IDs."""
+        ids: list[int] = []
+        meta_by_id: dict[int, dict] = {}
+        for entry in similar_entries or []:
+            raw_id = self._similar_raw_id(entry)
+            if raw_id is None or raw_id in meta_by_id:
+                continue
+            ids.append(raw_id)
+            meta_by_id[raw_id] = entry if isinstance(entry, dict) else {"raw_id": raw_id}
+
+        if not ids:
+            return []
+
+        placeholders = ", ".join(["%s"] * len(ids))
+        with self.cursor() as c:
+            c.execute(
+                f"""SELECT r.id, r.source_platform, r.source_channel, r.content_raw,
+                           r.collect_time, r.raw_status,
+                           a.risk_label, a.risk_sub_label, a.risk_score,
+                           a.risk_level, a.classification_method, a.created_at AS analyzed_at
+                    FROM ods_raw_intel r
+                    LEFT JOIN dwd_intel_analysis a
+                      ON r.id = a.raw_id AND a.is_latest=1
+                    WHERE r.id IN ({placeholders})""",
+                ids,
+            )
+            rows = c.fetchall()
+
+        by_id = {int(row["id"]): row for row in rows}
+        ordered = []
+        for raw_id in ids:
+            row = by_id.get(raw_id)
+            if not row:
+                continue
+            meta = meta_by_id.get(raw_id, {})
+            content = row.get("content_raw") or ""
+            row = dict(row)
+            row["content_preview"] = content[:140]
+            row["similarity"] = meta.get("similarity")
+            row["distance"] = meta.get("distance")
+            ordered.append(row)
+        return ordered
 
     def update_analysis(self, raw_id: int, **kwargs):
         """Update specific fields in dwd_intel_analysis."""
@@ -1304,6 +1388,10 @@ class MySQLStore:
             "risk_level": analysis.get("risk_level", "normal"),
             "classification_method": analysis.get("classification_method", ""),
             "evidence_spans": _json_load(analysis.get("evidence_spans"), []),
+            "similar_intel_ids": _json_load(analysis.get("similar_intel_ids"), []),
+            "similar_intel": self.list_similar_intel_details(
+                _json_load(analysis.get("similar_intel_ids"), [])
+            ),
             "entities": [
                 {
                     "entity_type": e.get("entity_type"),
@@ -1344,6 +1432,18 @@ class MySQLStore:
                 )
             return c.fetchall()
 
+    def list_unfinished_jobs(self, limit: int = 50) -> list[dict]:
+        """List jobs that still need an in-process worker."""
+        with self.cursor() as c:
+            c.execute(
+                """SELECT * FROM analysis_job
+                   WHERE status IN ('pending','running')
+                   ORDER BY created_at ASC
+                   LIMIT %s""",
+                (limit,),
+            )
+            return c.fetchall()
+
     # ==================================================================
     # Stats for Dashboard
     # ==================================================================
@@ -1356,6 +1456,8 @@ class MySQLStore:
             pending_count = c.fetchone()["cnt"]
             c.execute("SELECT COUNT(*) as cnt FROM ods_raw_intel WHERE raw_status='ANALYZING'")
             running_count = c.fetchone()["cnt"]
+            c.execute("SELECT COUNT(*) as cnt FROM ods_raw_intel WHERE raw_status='SCREENED'")
+            screened_count = c.fetchone()["cnt"]
             c.execute("SELECT COUNT(*) as cnt FROM ods_raw_intel WHERE raw_status='FAILED'")
             failed_count = c.fetchone()["cnt"]
             c.execute(
@@ -1390,6 +1492,7 @@ class MySQLStore:
             "today_count": today_count,
             "pending_count": pending_count,
             "running_count": running_count,
+            "screened_count": screened_count,
             "failed_count": failed_count,
             "high_risk_count": high_risk_count,
             "entity_count": entity_count,

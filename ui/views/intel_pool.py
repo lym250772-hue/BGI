@@ -5,7 +5,7 @@ import streamlit as st
 
 import ui.labels as L
 from ui import data
-from ui.components import empty_panel, page_header
+from ui.components import auto_refresh, empty_panel, page_header
 
 
 STATUS_OPTIONS = {
@@ -13,6 +13,7 @@ STATUS_OPTIONS = {
     "待研判": "RAW_COLLECTED",
     "已清洗待研判": "CLEANED",
     "研判中": "ANALYZING",
+    "已初筛": "SCREENED",
     "已研判": "ANALYZED",
     "研判失败": "FAILED",
     "已丢弃": "DISCARDED",
@@ -39,6 +40,7 @@ def _table(rows: list[dict]) -> pd.DataFrame:
 
 
 def show():
+    data.recover_unfinished_jobs(limit=20)
     page_header(
         "Intel Pool",
         "情报池",
@@ -65,23 +67,52 @@ def show():
         if st.button("提交当前筛选到后台队列", type="primary", disabled=not eligible, width="stretch"):
             job_ids = data.submit_batch_jobs(
                 eligible,
-                options={"enable_llm": True, "enable_graph_expand": False, "enable_report": False, "analysis_mode": "批量标准研判"},
+                options={
+                    "enable_llm": False,
+                    "enable_roberta": False,
+                    "enable_embedding": False,
+                    "enable_graph_expand": False,
+                    "enable_report": False,
+                    "analysis_mode": "批量快速筛查",
+                },
                 max_items=int(batch_size),
             )
+            st.session_state.pool_last_jobs = job_ids
             st.success(f"已提交 {len(job_ids)} 个任务：{', '.join(job_ids[:6])}")
             st.rerun()
 
     if not rows:
         empty_panel("没有符合条件的情报", "可以调整筛选条件，或等待新的结构化数据入库。")
-        return
+    else:
+        st.dataframe(
+            _table(rows),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "情报ID": st.column_config.NumberColumn(width="small"),
+                "内容摘要": st.column_config.TextColumn(width="large"),
+                "接收时间": st.column_config.TextColumn(width="medium"),
+            },
+        )
 
-    st.dataframe(
-        _table(rows),
-        hide_index=True,
-        width="stretch",
-        column_config={
-            "情报ID": st.column_config.NumberColumn(width="small"),
-            "内容摘要": st.column_config.TextColumn(width="large"),
-            "接收时间": st.column_config.TextColumn(width="medium"),
-        },
-    )
+    st.markdown("### 后台任务")
+    jobs = data.list_jobs(limit=12)
+    if jobs:
+        job_df = pd.DataFrame([
+            {
+                "任务ID": j.get("job_id"),
+                "情报ID": j.get("raw_id"),
+                "状态": L.job_status_label(j.get("status")),
+                "进度": f"{j.get('progress') or 0}%",
+                "当前步骤": j.get("current_step") or "-",
+                "错误": (j.get("error_message") or "")[:80],
+                "创建时间": str(j.get("created_at") or "")[:19],
+            }
+            for j in jobs
+        ])
+        st.dataframe(job_df, hide_index=True, width="stretch")
+    else:
+        st.info("暂无后台任务。")
+
+    if data.has_active_jobs():
+        auto_refresh(interval_ms=2500)

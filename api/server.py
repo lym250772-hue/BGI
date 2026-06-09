@@ -34,6 +34,7 @@ class StatsResponse(BaseModel):
     risk_distribution: dict = {}
     entities_total: int = 0
     pending_count: int = 0
+    screened_count: int = 0
     today_count: int = 0
     high_risk_count: int = 0
     entity_count: int = 0
@@ -70,6 +71,9 @@ class AnalyzeOptions(BaseModel):
     enable_graph_expand: bool = True
     enable_report: bool = True
     enable_llm: bool = True
+    enable_embedding: bool = False
+    enable_roberta: bool = True
+    analysis_mode: str = ""
 
 
 class AnalyzeRequest(BaseModel):
@@ -126,6 +130,7 @@ class AnalyzeResponse(BaseModel):
     entities: list[dict] = []
     slang_terms: list[dict] = []
     new_slang_candidates: list[dict] = []
+    similar_intel_ids: list = []
     graph_result: dict = {}
     agent_summary: str = ""
     disposal_advice: list[dict] = []
@@ -167,6 +172,9 @@ def agent_analyze(req: AnalyzeRequest):
             enable_graph_expand=opts.enable_graph_expand,
             enable_report=opts.enable_report,
             enable_llm=opts.enable_llm,
+            enable_embedding=opts.enable_embedding,
+            enable_roberta=opts.enable_roberta,
+            analysis_mode=opts.analysis_mode,
         )
 
         return AnalyzeResponse(
@@ -180,6 +188,7 @@ def agent_analyze(req: AnalyzeRequest):
             entities=result.get("entities", []),
             slang_terms=result.get("slang_terms", []),
             new_slang_candidates=result.get("new_slang_candidates", []),
+            similar_intel_ids=result.get("similar_intel_ids", []),
             graph_result=result.get("graph_result", {}),
             agent_summary=result.get("agent_summary", ""),
             disposal_advice=result.get("disposal_advice", []),
@@ -295,6 +304,7 @@ def get_stats():
             entities_total=stats.get("entity_count", 0),
             entity_count=stats.get("entity_count", 0),
             pending_count=stats.get("pending_count", 0),
+            screened_count=stats.get("screened_count", 0),
             recent_items=stats.get("recent_items", []),
         )
     except Exception as exc:

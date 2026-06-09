@@ -78,8 +78,15 @@ header[data-testid="stHeader"] {{
   border-bottom: 1px solid var(--bagi-line);
 }}
 
-#MainMenu, footer, .viewerBadge_container__r5tak {{
+#MainMenu,
+footer,
+.viewerBadge_container__r5tak,
+.stDeployButton,
+[data-testid="stToolbar"],
+[data-testid="stDecoration"] {{
   display: none !important;
+  visibility: hidden !important;
+  height: 0 !important;
 }}
 
 [data-testid="stSidebar"] {{
@@ -111,6 +118,18 @@ header[data-testid="stHeader"] {{
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) * {{
   color: #111820 !important;
   font-weight: 650 !important;
+}}
+
+.sidebar-footer {{
+  position: fixed !important;
+  left: 1rem !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: 1.1rem !important;
+  width: 15.2rem !important;
+  max-width: 15.2rem !important;
+  z-index: 20;
+  pointer-events: none;
 }}
 
 .block-container {{

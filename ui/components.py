@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import streamlit as st
 
 import ui.labels as L
@@ -64,3 +65,9 @@ def empty_panel(title: str, note: str):
         """,
         unsafe_allow_html=True,
     )
+
+
+def auto_refresh(interval_ms: int = 2500):
+    """Rerun the current Streamlit page while background jobs are active."""
+    time.sleep(max(0.5, int(interval_ms) / 1000))
+    st.rerun()

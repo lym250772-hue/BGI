@@ -32,7 +32,10 @@ class AnalysisEngine:
     def run(self, raw_data_id: int, text: str, platform: str,
             enable_graph_expand: bool = True,
             enable_report: bool = True,
-            enable_llm: bool = True) -> dict:
+            enable_llm: bool = True,
+            enable_embedding: bool = False,
+            enable_roberta: bool = True,
+            analysis_mode: str = "") -> dict:
         """Run full analysis pipeline via state-machine Agent.
 
         Returns a dict matching the PROJECT_PLAN.md AnalyzeResponse format.
@@ -45,6 +48,9 @@ class AnalysisEngine:
                 enable_graph_expand=enable_graph_expand,
                 enable_report=enable_report,
                 enable_llm=enable_llm,
+                enable_embedding=enable_embedding,
+                enable_roberta=enable_roberta,
+                analysis_mode=analysis_mode,
             )
         except Exception as exc:
             logger.error(f"Agent run failed [{raw_data_id}]: {exc}")
@@ -53,7 +59,10 @@ class AnalysisEngine:
     def run_stream(self, raw_data_id: int, text: str, platform: str,
                    enable_graph_expand: bool = True,
                    enable_report: bool = True,
-                   enable_llm: bool = True):
+                   enable_llm: bool = True,
+                   enable_embedding: bool = False,
+                   enable_roberta: bool = True,
+                   analysis_mode: str = ""):
         """Generator that yields step-by-step analysis progress for UI think-chain display."""
         try:
             yield from self.agent.run_stream(
@@ -63,6 +72,9 @@ class AnalysisEngine:
                 enable_graph_expand=enable_graph_expand,
                 enable_report=enable_report,
                 enable_llm=enable_llm,
+                enable_embedding=enable_embedding,
+                enable_roberta=enable_roberta,
+                analysis_mode=analysis_mode,
             )
         except Exception as exc:
             logger.error(f"Agent run_stream failed [{raw_data_id}]: {exc}")
