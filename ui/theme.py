@@ -82,11 +82,32 @@ header[data-testid="stHeader"] {{
 footer,
 .viewerBadge_container__r5tak,
 .stDeployButton,
-[data-testid="stToolbar"],
+[data-testid="stDeployButton"],
+[data-testid="stAppDeployButton"],
+[data-testid="stStatusWidget"],
 [data-testid="stDecoration"] {{
   display: none !important;
   visibility: hidden !important;
   height: 0 !important;
+}}
+
+[data-testid="stToolbar"],
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"],
+button[title="Open sidebar"],
+button[title="Close sidebar"],
+button[aria-label="Open sidebar"],
+button[aria-label="Close sidebar"] {{
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}}
+
+[data-testid="stSidebarCollapsedControl"] {{
+  position: fixed !important;
+  left: 0.72rem !important;
+  top: 0.72rem !important;
+  z-index: 9999 !important;
 }}
 
 [data-testid="stSidebar"] {{
@@ -125,7 +146,7 @@ footer,
   left: 1rem !important;
   right: auto !important;
   top: auto !important;
-  bottom: 1.1rem !important;
+  bottom: 0.45rem !important;
   width: 15.2rem !important;
   max-width: 15.2rem !important;
   z-index: 20;
@@ -314,6 +335,25 @@ h3 {{
 .stTabs [aria-selected="true"] {{
   background: white;
   color: var(--bagi-ink) !important;
+}}
+
+/*
+  Streamlit 的侧边栏展开按钮挂在顶部工具栏附近。
+  不能隐藏整个 stToolbar，否则侧边栏收起后就没有入口再展开。
+  这里只隐藏部署入口，保留侧边栏折叠/展开控件。
+*/
+div[data-testid="stAppDeployButton"],
+div[data-testid="stAppDeployButton"] * {{
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  pointer-events: none !important;
 }}
 </style>
 """

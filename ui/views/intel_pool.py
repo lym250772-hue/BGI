@@ -57,13 +57,16 @@ def _jobs_table(rows: list[dict]) -> pd.DataFrame:
     ])
 
 
-def show():
+def render_pool(include_header: bool = True):
     data.recover_unfinished_jobs(limit=20)
-    page_header(
-        "Intel Pool",
-        "情报池",
-        "查看已接收的结构化数据，并按状态批量提交后台研判。",
-    )
+    if include_header:
+        page_header(
+            "Intel Pool",
+            "情报池",
+            "查看已接收的结构化数据，并按状态批量提交后台研判。",
+        )
+    else:
+        st.markdown("### 情报池 / 批量处理")
 
     c1, c2, c3, c4 = st.columns([1, 1, 1.7, 0.8])
     with c1:
@@ -83,7 +86,7 @@ def show():
     b2.metric("可提交", len(eligible))
     with b3:
         if st.button(
-            "提交当前筛选到后台队列",
+            "提交当前筛选到智能分层队列",
             type="primary",
             disabled=not eligible,
             use_container_width=True,
@@ -96,12 +99,17 @@ def show():
                     "enable_embedding": False,
                     "enable_graph_expand": False,
                     "enable_report": False,
-                    "analysis_mode": "批量快速筛查",
+                    "analysis_mode": "批量智能初筛",
+                    "auto_escalate": True,
+                    "standard_threshold": 0.45,
+                    "graph_threshold": 0.55,
                 },
                 max_items=int(batch_size),
             )
             st.session_state.pool_last_jobs = job_ids
-            st.success(f"已提交 {len(job_ids)} 个任务：{', '.join(job_ids[:6])}")
+            st.success(
+                f"已提交 {len(job_ids)} 个初筛任务；命中条件的样本会自动追加标准研判或扩线研判。"
+            )
             st.rerun()
 
     if not rows:
@@ -127,3 +135,7 @@ def show():
 
     if data.has_active_jobs():
         auto_refresh(interval_ms=2500)
+
+
+def show():
+    render_pool(include_header=True)

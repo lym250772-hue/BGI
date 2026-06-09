@@ -1173,7 +1173,24 @@ class AnalysisAgent:
         from sentence_transformers import SentenceTransformer
         from config.settings import settings
         model = SentenceTransformer(settings.embedding_model_name)
-        self._embed_fn = lambda text: model.encode(text).tolist()
+        model.max_seq_length = min(int(getattr(model, "max_seq_length", 512) or 512), 512)
+        if getattr(model, "tokenizer", None) is not None:
+            try:
+                model.tokenizer.model_max_length = 512
+                model.tokenizer.truncation_side = "right"
+            except Exception:
+                pass
+
+        def _embed(text: str):
+            # 长文本只保留前部证据区，避免 BERT 类向量模型超过 512 token。
+            safe_text = (text or "")[:2000]
+            return model.encode(
+                safe_text,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            ).tolist()
+
+        self._embed_fn = _embed
         logger.info("Embedding model loaded")
 
     def _get_entity_extractor(self):

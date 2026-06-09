@@ -740,6 +740,24 @@ def list_jobs(limit: int = 20) -> list[dict]:
         return []
 
 
+def latest_job_for_raw(raw_id: int) -> dict:
+    """Return the newest analysis job for one raw intelligence row."""
+    try:
+        from storage.mysql_store import mysql
+        with mysql.cursor() as c:
+            c.execute(
+                """SELECT *
+                   FROM analysis_job
+                   WHERE raw_id=%s
+                   ORDER BY created_at DESC
+                   LIMIT 1""",
+                (raw_id,),
+            )
+            return dict(c.fetchone() or {})
+    except Exception:
+        return {}
+
+
 def recover_unfinished_jobs(limit: int = 20) -> int:
     try:
         from analyzer.worker import recover_unfinished_jobs as recover
@@ -860,6 +878,8 @@ def graph_neighbors(entity_type: str, value: str, depth: int = 2) -> list[dict]:
         raw_type = props.get("type") or (labels[0] if labels else "-")
         clue_type = L.entity_type_label(raw_type)
         clue_value = props.get("value") or props.get("uuid") or "-"
+        if raw_type == "Intel" or clue_value == "-" or props.get("raw_id"):
+            continue
         unique_key = (",".join(labels), str(clue_type), str(clue_value), len(rels), rel_name)
         if unique_key in seen:
             continue

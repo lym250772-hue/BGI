@@ -50,7 +50,8 @@ def _do_collect(platform: str, keywords: list[str], max_pages: int, fetch_replie
         collector = get_collector(platform, **kwargs)
         logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 开始采集 {platform} · {', '.join(keywords)}")
         for item in collector.collect():
-            # 写入 MySQL
+            # 写入 MySQL；失败必须暴露在日志里，否则前端看得到采集结果，
+            # 但情报池查不到入库数据，会造成“数据消失”的错觉。
             try:
                 mysql.insert_raw({
                     "source_platform": item.platform,
@@ -62,8 +63,10 @@ def _do_collect(platform: str, keywords: list[str], max_pages: int, fetch_replie
                     "raw_status": "RAW_COLLECTED",
                     "collect_time": item.collected_at,
                 })
-            except Exception:
-                pass
+            except Exception as exc:
+                logs.append(
+                    f"[WARN] 入库失败：{(item.content_raw or '')[:40]}... · {exc}"
+                )
 
             results.append({
                 "平台": item.platform,
@@ -210,6 +213,10 @@ def show():
                 """,
                 unsafe_allow_html=True,
             )
+
+    st.markdown("---")
+    from ui.views import intel_pool
+    intel_pool.render_pool(include_header=False)
 
 
 # ── 辅助函数 ────────────────────────────────────────────────────────────────

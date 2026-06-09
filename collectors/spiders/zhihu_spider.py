@@ -96,6 +96,21 @@ class ZhihuSearchSpider:
     COMMENTS_API = "https://www.zhihu.com/api/v4/answers/{aid}/comments"
     PAGE_SIZE = 20  # 知乎 API 每页返回数量
 
+    @classmethod
+    def interactive_login(cls, headless: bool = False):
+        """弹出浏览器完成知乎登录，并保存 Cookie 到 data/raw/zhihu_cookies.json。"""
+        from collectors.spiders.base_spider import BaseSpider
+
+        class _ZhihuCookieLoginSpider(BaseSpider):
+            PLATFORM = "zhihu"
+            HOME_URL = cls.ZHIHU_HOME
+            PAGE_SIZE = cls.PAGE_SIZE
+
+            def search_and_parse(self, keyword: str, max_pages: int = 3, **kwargs) -> list:
+                return []
+
+        return _ZhihuCookieLoginSpider.interactive_login(headless=headless)
+
     def __init__(
         self,
         headless: bool = True,

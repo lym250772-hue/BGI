@@ -64,6 +64,19 @@ class ZhihuAPISpider:
         self.max_answers = max_answers
         self.fetch_comments = fetch_comments
 
+    @classmethod
+    def interactive_login(cls, headless: bool = False):
+        """弹出浏览器完成知乎登录，并保存给 HTTP API Spider 复用的 Cookie。"""
+        class _ZhihuCookieLoginSpider(BaseSpider):
+            PLATFORM = "zhihu"
+            HOME_URL = "https://www.zhihu.com"
+            PAGE_SIZE = cls.PAGE_SIZE
+
+            def search_and_parse(self, keyword: str, max_pages: int = 3, **kwargs) -> list:
+                return []
+
+        return _ZhihuCookieLoginSpider.interactive_login(headless=headless)
+
     # ═══════════════════════════════════════════════════════════════════════════
     # Cookie
     # ═══════════════════════════════════════════════════════════════════════════

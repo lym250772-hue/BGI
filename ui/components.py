@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import time
 import streamlit as st
+import streamlit.components.v1 as components
 
 import ui.labels as L
 import ui.theme as T
@@ -68,6 +68,16 @@ def empty_panel(title: str, note: str):
 
 
 def auto_refresh(interval_ms: int = 2500):
-    """Rerun the current Streamlit page while background jobs are active."""
-    time.sleep(max(0.5, int(interval_ms) / 1000))
-    st.rerun()
+    """Schedule a browser-side refresh without blocking page rendering."""
+    interval = max(800, int(interval_ms))
+    components.html(
+        f"""
+        <script>
+          window.setTimeout(function() {{
+            window.parent.location.reload();
+          }}, {interval});
+        </script>
+        """,
+        height=0,
+        width=0,
+    )

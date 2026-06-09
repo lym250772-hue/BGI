@@ -56,6 +56,23 @@ class WeiboAPISpider:
         self._session = requests.Session()
         self._cookies_loaded = False
 
+    @classmethod
+    def interactive_login(cls, headless: bool = False):
+        """弹出浏览器完成微博登录，并保存给 HTTP API Spider 复用的 Cookie。
+
+        WeiboAPISpider 本身是 requests 采集器，不继承 BaseSpider；
+        这里仅提供一个兼容入口，避免答辩手册中的登录命令报错。
+        """
+        class _WeiboCookieLoginSpider(BaseSpider):
+            PLATFORM = "weibo"
+            HOME_URL = "https://weibo.com"
+            PAGE_SIZE = cls.PAGE_SIZE
+
+            def search_and_parse(self, keyword: str, max_pages: int = 3, **kwargs) -> list:
+                return []
+
+        return _WeiboCookieLoginSpider.interactive_login(headless=headless)
+
     # ═══════════════════════════════════════════════════════════════════════════
     # Cookie 管理
     # ═══════════════════════════════════════════════════════════════════════════

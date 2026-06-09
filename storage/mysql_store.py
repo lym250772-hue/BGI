@@ -1340,6 +1340,9 @@ class MySQLStore:
                 (raw_id))
             report = c.fetchone() or {}
 
+        if not analysis:
+            return {}
+
         def _json_load(value, default):
             if value is None:
                 return default

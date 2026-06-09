@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import streamlit as st
 
 import ui.theme as T
-from ui.views import collector, intel_pool, knowledge, overview, system_status, workbench
+from ui.views import collector, knowledge, overview, system_status, workbench
 
 
 st.set_page_config(
@@ -27,9 +27,12 @@ PAGES = {
     "overview": ("总览 / ChatBI", overview.show),
     "collector": ("采集器管理", collector.show),
     "workbench": ("研判工作台", workbench.show),
-    "intel_pool": ("情报池", intel_pool.show),
     "knowledge": ("知识库", knowledge.show),
     "system": ("系统状态", system_status.show),
+}
+
+PAGE_ALIASES = {
+    "intel_pool": "collector",
 }
 
 
@@ -39,6 +42,7 @@ def _initial_page() -> str:
         page = st.query_params.get("page")
         if isinstance(page, list):
             page = page[0] if page else None
+        page = PAGE_ALIASES.get(page, page)
         if page in PAGES:
             return page
     except Exception:

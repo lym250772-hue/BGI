@@ -30,6 +30,70 @@ def _business_status_from_options(options: dict | None) -> str:
     return "ANALYZED"
 
 
+def _entity_types(result: dict) -> set[str]:
+    types: set[str] = set()
+    for ent in result.get("entities") or []:
+        etype = ent.get("entity_type") if isinstance(ent, dict) else ""
+        types.add(etype.value if hasattr(etype, "value") else str(etype or ""))
+    return types
+
+
+def _choose_followup_options(result: dict, options: dict | None) -> dict | None:
+    """Decide whether a quick-screened item should enter a deeper second pass."""
+    opts = options or {}
+    if not opts.get("auto_escalate"):
+        return None
+
+    mode = str(opts.get("analysis_mode") or "")
+    is_quick = "初筛" in mode or "快速" in mode or _business_status_from_options(opts) == "SCREENED"
+    if not is_quick:
+        return None
+
+    risk_score = float(result.get("risk_score") or 0)
+    risk_level = str(result.get("risk_level") or "")
+    candidates = result.get("new_slang_candidates") or []
+    entity_types = _entity_types(result)
+    expandable_types = {
+        "wechat", "qq", "telegram", "phone", "email", "bank_card",
+        "alipay", "url", "domain", "ip", "crypto_wallet", "tool",
+    }
+    has_expandable = bool(entity_types & expandable_types)
+    standard_threshold = float(opts.get("standard_threshold") or 0.45)
+    graph_threshold = float(opts.get("graph_threshold") or 0.55)
+
+    should_standard = (
+        risk_score >= standard_threshold
+        or risk_level in {"high", "critical"}
+        or bool(candidates)
+    )
+    should_graph = has_expandable and (
+        risk_score >= graph_threshold
+        or risk_level in {"high", "critical"}
+    )
+
+    if should_graph:
+        return {
+            "enable_llm": True,
+            "enable_roberta": True,
+            "enable_embedding": True,
+            "enable_graph_expand": True,
+            "enable_report": False,
+            "analysis_mode": "自动扩线研判",
+            "auto_escalate": False,
+        }
+    if should_standard:
+        return {
+            "enable_llm": True,
+            "enable_roberta": True,
+            "enable_embedding": False,
+            "enable_graph_expand": False,
+            "enable_report": False,
+            "analysis_mode": "自动标准研判",
+            "auto_escalate": False,
+        }
+    return None
+
+
 def _get_executor() -> ThreadPoolExecutor:
     global _executor
     if _executor is None:
@@ -96,6 +160,24 @@ def submit_analysis(job_id: str, raw_id: int, text: str, platform: str = "unknow
             mysql.update_job_status(job_id, status="success", progress=100,
                                     current_step="done",
                                     result_analysis_id=final_result.get("analysis_id"))
+            followup_options = _choose_followup_options(final_result, opts)
+            if followup_options:
+                followup_id = mysql.create_job(raw_id, text, platform, options=followup_options)
+                mysql.update_job_status(
+                    job_id,
+                    current_step=f"done → auto_escalated:{followup_id}",
+                )
+                submit_analysis(
+                    followup_id,
+                    raw_id,
+                    text,
+                    platform,
+                    options=followup_options,
+                )
+                logger.info(
+                    f"Job {job_id} auto-escalated raw_id={raw_id} to {followup_id} "
+                    f"mode={followup_options['analysis_mode']}"
+                )
             logger.info(f"Job {job_id} completed: raw_id={raw_id}")
         except Exception as exc:
             logger.error(f"Job {job_id} failed: {exc}")

@@ -85,7 +85,7 @@ def _render_result(raw_id: int):
     risk_label = result.get("risk_label") or "未分类"
     score = float(result.get("risk_score") or 0)
 
-    st.markdown("### 研判结论")
+    st.markdown(f"### 研判结论 · #{raw_id}")
     a, b, c, d = st.columns(4)
     a.metric("风险大类", risk_label)
     b.metric("细分类型", result.get("risk_sub_label") or "-")
@@ -213,8 +213,7 @@ def _jobs_table():
 
 
 def _render_pending_result(raw_id: int, selected: dict):
-    jobs = [j for j in data.list_jobs(limit=30) if int(j.get("raw_id") or 0) == int(raw_id)]
-    latest = jobs[0] if jobs else {}
+    latest = data.latest_job_for_raw(raw_id)
     status = L.raw_status_label(selected.get("raw_status"))
     if latest:
         status = L.job_status_label(latest.get("status"))
@@ -242,6 +241,42 @@ def _render_pending_result(raw_id: int, selected: dict):
         st.info("任务尚未完成。页面会在后台任务执行期间自动刷新。")
 
 
+def _active_result_id(current_raw_id: int) -> int:
+    active = _query_int("result_raw_id") or st.session_state.get("wb_active_raw_id")
+    try:
+        return int(active or current_raw_id)
+    except Exception:
+        return current_raw_id
+
+
+def _should_render_result(raw_id: int, raw_status: str, latest_job: dict) -> bool:
+    if latest_job.get("status") == "success":
+        return True
+    return raw_status in ("SCREENED", "ANALYZED")
+
+
+def _render_active_result(active_raw_id: int, selected: dict | None = None):
+    active_raw = data.get_raw(active_raw_id) or {}
+    fallback = selected or {}
+    active_status = active_raw.get("raw_status") or fallback.get("raw_status") or ""
+    latest_job = data.latest_job_for_raw(active_raw_id)
+
+    if _should_render_result(active_raw_id, active_status, latest_job):
+        result = data.get_analysis_bundle(active_raw_id)
+        if result:
+            _render_result(active_raw_id)
+        else:
+            _render_pending_result(active_raw_id, active_raw or fallback)
+    elif active_status == "FAILED" or latest_job.get("status") == "failed":
+        error_msg = latest_job.get("error_message") or ""
+        meta = active_raw.get("metadata") or {}
+        if isinstance(meta, dict):
+            error_msg = error_msg or meta.get("last_error", "")
+        st.error(error_msg or "研判失败，请查看后台任务错误。")
+    else:
+        _render_pending_result(active_raw_id, active_raw or fallback)
+
+
 def show():
     data.recover_unfinished_jobs(limit=20)
     page_header(
@@ -264,6 +299,11 @@ def show():
     rows = data.list_intel(status=STATUS_OPTIONS[status_label], keyword=keyword, limit=120)
     if not rows:
         empty_panel("当前队列没有情报", "可以切换到其他队列，或等待搭档导入新的结构化数据。")
+        active_raw_id = _query_int("result_raw_id") or st.session_state.get("wb_active_raw_id")
+        if active_raw_id:
+            st.divider()
+            st.markdown("### 当前提交")
+            _render_active_result(int(active_raw_id))
         st.markdown("### 后台任务")
         job_rows = _jobs_table()
         if any(j.get("status") in ("pending", "running") for j in job_rows):
@@ -292,8 +332,7 @@ def show():
             unsafe_allow_html=True,
         )
     with top_right:
-        st.markdown("<div class='bagi-panel'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>提交后台研判</div>", unsafe_allow_html=True)
+        st.markdown("### 提交后台研判")
         st.caption("不会阻塞页面。提交后可以继续切换其他情报。")
         if st.button("提交研判任务", type="primary", use_container_width=True, key="submit_job"):
             text = data.preferred_text(raw_id, fallback=selected.get("content_raw") or "")
@@ -312,30 +351,12 @@ def show():
                 pass
             st.success(f"已提交任务：{job_id}")
             st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
     tab_result, tab_jobs = st.tabs(["研判结果", "后台任务"])
     with tab_result:
-        active_raw_id = int(
-            _query_int("result_raw_id")
-            or st.session_state.get("wb_active_raw_id")
-            or raw_id
-        )
-        active_raw = data.get_raw(active_raw_id) or {}
-        active_status = active_raw.get("raw_status") or (
-            selected.get("raw_status") if active_raw_id == raw_id else ""
-        )
-        if active_status in ("SCREENED", "ANALYZED", "FAILED"):
-            if active_raw.get("raw_status") == "FAILED":
-                meta = active_raw.get("metadata") or {}
-                if isinstance(meta, str):
-                    meta = {}
-                st.error(meta.get("last_error", "研判失败，请查看后台任务错误。"))
-            else:
-                _render_result(active_raw_id)
-        else:
-            _render_pending_result(active_raw_id, selected if active_raw_id == raw_id else active_raw)
+        active_raw_id = _active_result_id(raw_id)
+        _render_active_result(active_raw_id, selected if active_raw_id == raw_id else None)
     with tab_jobs:
         _jobs_table()
 

@@ -669,14 +669,23 @@ class BaseSpider(ABC):
 
         try:
             playwright = sync_playwright().start()
-            browser = playwright.chromium.launch(
-                headless=headless,
-                args=[
+            launch_kwargs = {
+                "headless": headless,
+                "args": [
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                 ],
-            )
+            }
+            try:
+                browser = playwright.chromium.launch(
+                    channel="msedge",
+                    **launch_kwargs,
+                )
+                logger.info("  已使用系统 Microsoft Edge 启动登录浏览器")
+            except Exception as edge_exc:
+                logger.warning(f"  Edge 启动失败，尝试 Playwright Chromium: {edge_exc}")
+                browser = playwright.chromium.launch(**launch_kwargs)
             context = browser.new_context(
                 user_agent=random_ua(),
                 locale="zh-CN",
