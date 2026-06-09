@@ -515,44 +515,6 @@ class ZhihuSearchSpider:
             },
         )
 
-    # ── API 调用（通过 page.evaluate 在浏览器上下文内执行）─────────────────
-
-    def _call_search_api(self, keyword: str, offset: int = 0) -> list[dict]:
-        """在浏览器上下文中调用知乎搜索 API，返回 JSON 结果列表。"""
-        from urllib.parse import quote
-        encoded = quote(keyword)
-        url = f"{self.SEARCH_API}?q={encoded}&type=content&offset={offset}&limit={self.PAGE_SIZE}"
-
-        js_code = f"""
-        async () => {{
-            try {{
-                const resp = await fetch('{url}', {{
-                    method: 'GET',
-                    credentials: 'include',
-                    headers: {{
-                        'Accept': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                    }}
-                }});
-                if (!resp.ok) {{
-                    return {{ error: true, status: resp.status }};
-                }}
-                return await resp.json();
-            }} catch(e) {{
-                return {{ error: true, message: e.message }};
-            }}
-        }}
-        """
-        result = self._page.evaluate(js_code)
-
-        if not result or result.get("error"):
-            status = result.get("status", "?") if result else "null"
-            logger.warning(f"  搜索 API 返回异常 (status={status})")
-            return []
-
-        # 知乎 API 返回格式: {"data": [...], "paging": {...}}
-        data = result.get("data", [])
-        return data if isinstance(data, list) else []
 
     def _fetch_answers(self, question_id: str) -> list[dict]:
         """获取问题的回答列表（通过知乎问题 API）。"""
@@ -646,83 +608,6 @@ class ZhihuSearchSpider:
             })
         return comments
 
-    # ── 数据解析 ────────────────────────────────────────────────────────────
-
-    def _parse_search_result(self, result: dict, keyword: str) -> ParsedZhihuItem | None:
-        """解析单条搜索结果 JSON。"""
-        obj = result.get("object", {})
-        if not obj:
-            return None
-
-        result_type = obj.get("type", "")
-
-        # 提取问题信息（answer 和 article 类型下都有 question 字段）
-        question = obj.get("question", {})
-        title = ""
-        qid = ""
-        question_url = ""
-
-        if question:
-            title = question.get("title", "")
-            qid = str(question.get("id", ""))
-            question_url = question.get("url", "")
-            if question_url and not question_url.startswith("http"):
-                question_url = f"https://www.zhihu.com{question_url}"
-
-        # 如果没有问题信息，可能是 question 类型的搜索结果
-        if not title and result_type == "question":
-            title = obj.get("title", "")
-            qid = str(obj.get("id", ""))
-            question_url = obj.get("url", "")
-            if question_url and not question_url.startswith("http"):
-                question_url = f"https://www.zhihu.com{question_url}"
-
-        if not title:
-            return None
-
-        # 摘要/节选内容
-        excerpt = obj.get("excerpt", "")
-        snippet = self._clean_html(excerpt) if excerpt else ""
-
-        # 组合内容
-        content_raw = title
-        if snippet and snippet != title:
-            content_raw = f"【问题】{title}\n【摘要】{snippet}"
-
-        # 作者
-        author = obj.get("author", {})
-        author_name = author.get("name", "") if isinstance(author, dict) else ""
-        author_uid = author.get("id", "") if isinstance(author, dict) else ""
-
-        # 话题
-        topics = []
-        for t in question.get("topics", []) if question else []:
-            if isinstance(t, dict):
-                topics.append(t.get("name", ""))
-
-        item = ParsedZhihuItem(
-            content_raw=content_raw,
-            content_type="text",
-            source_url=question_url,
-            author_uid=str(author_uid),
-            author_username=author_name,
-            question_id=qid,
-            answer_id=str(obj.get("id", "")),
-            collected_at=self._ts_to_datetime(obj.get("created_time", 0)),
-            keyword=keyword,
-            voteup_count=obj.get("voteup_count", 0),
-            comment_count=obj.get("comment_count", 0),
-            topics=topics,
-            metadata={
-                "keyword": keyword,
-                "result_type": result_type,
-                "voteup_count": obj.get("voteup_count", 0),
-                "comment_count": obj.get("comment_count", 0),
-                "topics": topics,
-                "has_emoji": self._contains_emoji(title + snippet),
-            },
-        )
-        return item
 
     def _parse_answer(self, answer_data: dict, question_id: str) -> dict:
         """解析单条回答 JSON。"""

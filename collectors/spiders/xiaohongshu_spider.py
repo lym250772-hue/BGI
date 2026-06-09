@@ -70,7 +70,6 @@ class XiaohongshuSearchSpider(BaseSpider):
 
     def __init__(self, headless: bool = True):
         super().__init__(headless)
-        self._api_responses: list[dict] = []       # API 拦截缓存
         self._api_capture_enabled = False
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -146,7 +145,6 @@ class XiaohongshuSearchSpider(BaseSpider):
                 try:
                     body = response.json()
                     if body and body.get("success", False):
-                        self._api_responses.append(body)
                         logger.debug(f"  拦截到搜索 API 响应: {len(body.get('data',{}).get('items',[]))} 条")
                 except Exception:
                     pass
@@ -408,115 +406,6 @@ class XiaohongshuSearchSpider(BaseSpider):
             logger.debug(f'SSR 提取失败: {e}')
             return []
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # API 响应解析
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    def _parse_api_responses(
-        self, responses: list[dict], keyword: str
-    ) -> list[ParsedXiaohongshuItem]:
-        """解析 API 响应的 JSON 数据。"""
-        items = []
-        seen_ids = set()
-
-        for resp in responses:
-            data = resp.get("data", {})
-            note_list = data.get("items", []) or data.get("notes", [])
-
-            for note in note_list:
-                note_id = str(note.get("id", "") or note.get("note_id", ""))
-                if not note_id or note_id in seen_ids:
-                    continue
-                seen_ids.add(note_id)
-
-                # 提取笔记卡片信息
-                note_card = note.get("note_card", note)
-                display = note_card.get("display_title", "") or note.get("display_title", "")
-                title = note_card.get("title", "") or note.get("title", "")
-                desc = note_card.get("desc", "") or note.get("desc", "")
-
-                # 作者信息
-                author_info = note.get("user", {}) or note_card.get("user", {}) or note.get("author", {}) or {}
-                author_name = author_info.get("nickname", "") or author_info.get("name", "")
-                author_id = str(author_info.get("id", "") or author_info.get("user_id", ""))
-
-                # 互动数据
-                interact = note.get("interact_info", {}) or note_card.get("interact_info", {}) or {}
-
-                # 标签
-                tags = []
-                for t in note.get("tag_list", []) or note_card.get("tag_list", []):
-                    if isinstance(t, dict):
-                        tags.append(t.get("name", ""))
-                    elif isinstance(t, str):
-                        tags.append(t)
-
-                # 图片列表
-                image_list = []
-                for img in note.get("image_list", []) or note_card.get("image_list", []):
-                    if isinstance(img, dict):
-                        url = img.get("url", "") or img.get("url_default", "")
-                        if url:
-                            image_list.append(url)
-
-                # 构建内容
-                content_parts = []
-                if title:
-                    content_parts.append(f"【标题】{self.clean_html(title)}")
-                if desc:
-                    content_parts.append(f"【正文】{self.clean_html(desc)}")
-                if display:
-                    content_parts.append(f"【摘要】{self.clean_html(display)}")
-                if not content_parts:
-                    content_parts.append("【无文本内容】")
-
-                content_raw = "\n".join(content_parts)
-
-                # 内容类型
-                note_type = note_card.get("type", "") or note.get("type", "")
-                content_type = "text"
-                if note_type == "video":
-                    content_type = "video"
-                elif image_list:
-                    content_type = "image"
-
-                # 时间
-                time_ts = note_card.get("time", 0) or note.get("time", 0)
-                note_time = self.ts_to_datetime(time_ts) if time_ts else datetime.utcnow()
-
-                item = ParsedXiaohongshuItem(
-                    content_raw=content_raw,
-                    content_type=content_type,
-                    source_url=f"https://www.xiaohongshu.com/explore/{note_id}",
-                    author_uid=author_id,
-                    author_username=author_name,
-                    note_id=note_id,
-                    collected_at=note_time,
-                    keyword=keyword,
-                    like_count=int(interact.get("liked_count", 0) or note_card.get("liked_count", 0)),
-                    collect_count=int(interact.get("collected_count", 0) or note_card.get("collected_count", 0)),
-                    comment_count=int(interact.get("comment_count", 0) or note_card.get("comment_count", 0)),
-                    tags=tags,
-                    image_list=image_list,
-                    metadata={
-                        "keyword": keyword,
-                        "note_id": note_id,
-                        "note_type": note_type,
-                        "has_image": bool(image_list),
-                        "has_video": note_type == "video",
-                        "has_emoji": self.contains_emoji(content_raw),
-                        "tags": tags,
-                        "like_count": int(interact.get("liked_count", 0) or note_card.get("liked_count", 0)),
-                        "collect_count": int(interact.get("collected_count", 0) or note_card.get("collected_count", 0)),
-                        "comment_count": int(interact.get("comment_count", 0) or note_card.get("comment_count", 0)),
-                    },
-                )
-                items.append(item)
-
-        return items
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # DOM 解析（兜底方案）
     # ═══════════════════════════════════════════════════════════════════════════
 
     def _parse_dom_results(

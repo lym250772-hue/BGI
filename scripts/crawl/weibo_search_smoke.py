@@ -1,5 +1,5 @@
 """
-微博关键词搜索功能测试
+微博关键词搜索功能测试（纯HTTP AJAX API）
 用法: python scripts/crawl/weibo_search_smoke.py
       python scripts/crawl/weibo_search_smoke.py 刷单 2
 """
@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # 强制 UTF-8 输出，避免 Windows GBK 终端乱码
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore
 
-from collectors.spiders.weibo_spider import WeiboSearchSpider
+from collectors.spiders.weibo_api_spider import WeiboAPISpider
 
 
 def clean_text(text: str) -> str:
@@ -31,10 +31,8 @@ def main():
     print("=" * 60)
 
     # ── 执行搜索 ──────────────────────────────────────────────────────────
-    spider = WeiboSearchSpider(headless=True)
-    spider.start()
-    items = spider.search_and_parse(keyword, max_pages=max_pages)
-    spider.close()
+    spider = WeiboAPISpider()
+    items = spider.search(keyword, max_pages=max_pages)
 
     # ── 输出结果 ──────────────────────────────────────────────────────────
     print(f"\n共采集 {len(items)} 条微博\n")
@@ -47,9 +45,9 @@ def main():
         print(f"  内容类型:  {item.content_type}")
         print(f"  来源链接:  {item.source_url}")
         print(f"  关键词:    {item.keyword}")
-        print(f"  长文:      {item.metadata.get('is_long_text')}")
-        print(f"  含图片:    {item.metadata.get('has_image')}")
-        print(f"  含视频:    {item.metadata.get('has_video')}")
+        print(f"  转发数:    {item.reposts_count}")
+        print(f"  评论数:    {item.comments_count}")
+        print(f"  点赞数:    {item.attitudes_count}")
         print(f"  ─────────────────────────────────────────────")
         text = clean_text(item.content_raw)
         if len(text) > 150:

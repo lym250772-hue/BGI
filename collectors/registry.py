@@ -23,7 +23,7 @@ def _get_weibo_collector(**kwargs) -> BaseCollector:
     return WeiboCollector(
         keywords=kwargs.get("keywords", []),
         max_pages_per_keyword=kwargs.get("max_pages_per_keyword", 3),
-        headless=kwargs.get("headless", True))
+        fetch_comments=kwargs.get("fetch_comments", True))
 
 
 def _get_tieba_collector(**kwargs) -> BaseCollector:
@@ -40,10 +40,8 @@ def _get_zhihu_collector(**kwargs) -> BaseCollector:
     return ZhihuCollector(
         keywords=kwargs.get("keywords", []),
         max_pages_per_keyword=kwargs.get("max_pages_per_keyword", 10),
-        max_items_per_keyword=kwargs.get("max_items_per_keyword", 0),
         fetch_answers=kwargs.get("fetch_answers", True),
         fetch_comments=kwargs.get("fetch_comments", False),
-        incremental=kwargs.get("incremental", False),
         headless=kwargs.get("headless", True))
 
 
