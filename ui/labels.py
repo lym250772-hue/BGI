@@ -81,13 +81,13 @@ SLANG_STATUS_LABELS = {
 }
 
 RAW_STATUS_LABELS = {
-    "RAW_COLLECTED": "待研判",
+    "RAW_COLLECTED": "待清洗",
     "CLEANED": "已清洗待研判",
     "ANALYZING": "研判中",
-    "SCREENED": "已初筛",
     "ANALYZED": "已研判",
     "FAILED": "研判失败",
     "DISCARDED": "已丢弃",
+    "SCREENED": "待清洗",
     "pending": "待执行",
     "running": "执行中",
     "success": "已完成",

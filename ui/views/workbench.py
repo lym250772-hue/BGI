@@ -16,9 +16,7 @@ from ui.components import (
 
 
 STATUS_OPTIONS = {
-    "待研判": "RAW_COLLECTED",
     "已清洗待研判": "CLEANED",
-    "已初筛": "SCREENED",
     "研判失败": "FAILED",
     "已研判": "ANALYZED",
     "全部": None,
@@ -79,7 +77,7 @@ def _option_label(row: dict) -> str:
 def _render_result(raw_id: int):
     result = data.get_analysis_bundle(raw_id)
     if not result:
-        empty_panel("尚未完成研判", "提交后台任务后，任务完成会自动写回 MySQL、Neo4j、Milvus 和 Doris。")
+        empty_panel("尚未完成研判", "提交后台任务后，任务完成会自动写回 MySQL、Neo4j 和 Milvus。")
         return
 
     risk_label = result.get("risk_label") or "未分类"
@@ -252,7 +250,7 @@ def _active_result_id(current_raw_id: int) -> int:
 def _should_render_result(raw_id: int, raw_status: str, latest_job: dict) -> bool:
     if latest_job.get("status") == "success":
         return True
-    return raw_status in ("SCREENED", "ANALYZED")
+    return raw_status in ("ANALYZED",)
 
 
 def _render_active_result(active_raw_id: int, selected: dict | None = None):

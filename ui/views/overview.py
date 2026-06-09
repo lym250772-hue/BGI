@@ -107,13 +107,12 @@ def show():
     )
 
     stats = data.overview_stats()
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("接收总量", stats["total_raw"])
     c2.metric("待研判", stats["pending"])
-    c3.metric("已初筛", stats.get("screened", 0))
-    c4.metric("研判中", stats["running"])
-    c5.metric("已研判", stats["analyzed"])
-    c6.metric("高危情报", stats["high_risk"])
+    c3.metric("研判中", stats["running"])
+    c4.metric("已研判", stats["analyzed"])
+    c5.metric("高危情报", stats["high_risk"])
 
     left, right = st.columns([1.25, 1])
     with left:

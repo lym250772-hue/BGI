@@ -140,12 +140,14 @@ def overview_stats() -> dict:
                          DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR))"""
             )
             today_received = c.fetchone()["cnt"]
+        # Merge SCREENED → RAW_COLLECTED (legacy status)
+        screened = status_counts.pop("SCREENED", 0)
+        status_counts["RAW_COLLECTED"] = status_counts.get("RAW_COLLECTED", 0) + screened
         return {
             "status_counts": status_counts,
             "total_raw": sum(status_counts.values()),
             "pending": status_counts.get("RAW_COLLECTED", 0) + status_counts.get("CLEANED", 0),
             "running": status_counts.get("ANALYZING", 0),
-            "screened": status_counts.get("SCREENED", 0),
             "analyzed": status_counts.get("ANALYZED", 0),
             "failed": status_counts.get("FAILED", 0),
             "today_analyzed": today_analyzed,
@@ -528,7 +530,7 @@ def _chatbi_queue_status() -> dict:
     ]
     answer = (
         f"当前接收总量 {stats['total_raw']} 条；待研判 {stats['pending']} 条，"
-        f"研判中 {stats['running']} 条，已初筛 {stats.get('screened', 0)} 条，"
+        f"研判中 {stats['running']} 条，"
         f"已研判 {stats['analyzed']} 条，失败 {stats['failed']} 条。"
     )
     return {
@@ -899,16 +901,16 @@ def graph_neighbors(entity_type: str, value: str, depth: int = 2) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def run_cleaning(raw_ids: list[int]) -> dict:
-    """对指定 raw_id 列表执行清洗，返回清洗统计和详情。
+    """对指定 raw_id 列表执行 v2.0 清洗管道，返回清洗统计和详情。
 
     Returns:
         {
-            "total": int,
-            "cleaned": int,
-            "discarded": int,
+            "total": int, "cleaned": int, "discarded": int,
+            "media_only": int, "similar": int,
             "details": [{"id": int, "platform": str, "original": str, "text": str,
                           "status": str, "noise_reason": str, "noise_score": float,
-                          "is_duplicate": bool}, ...],
+                          "content_role": str, "is_media_only": bool,
+                          "is_similar": bool, "similar_to": str}, ...],
             "errors": [str, ...],
         }
     """
@@ -934,12 +936,14 @@ def run_cleaning(raw_ids: list[int]) -> dict:
                     "id": row["id"],
                     "platform": row.get("source_platform") or "unknown",
                     "content_raw": row.get("content_raw") or "",
+                    "author_uid": row.get("author_id") or "",
+                    "author_username": row.get("author_name") or "",
                 })
-        except Exception as exc:
+        except Exception:
             pass
 
     # 执行清洗
-    cleaned, discarded = 0, 0
+    cleaned, discarded, media_only, similar = 0, 0, 0, 0
     details: list[dict] = []
     errors: list[str] = []
 
@@ -949,9 +953,13 @@ def run_cleaning(raw_ids: list[int]) -> dict:
                 item["content_raw"],
                 existing_hashes=existing_hashes,
                 platform=item["platform"],
+                author_uid=item["author_uid"],
+                author_username=item["author_username"],
             )
 
-            if result["should_discard"]:
+            status = result.get("status", "CLEANED" if not result["should_discard"] else "DISCARDED")
+
+            if status == "DISCARDED":
                 mysql.update_raw_status(item["id"], "DISCARDED",
                                         clean_text=result["text"])
                 discarded += 1
@@ -961,18 +969,28 @@ def run_cleaning(raw_ids: list[int]) -> dict:
                     clean_text=result["text"],
                     simhash=result["simhash"],
                 )
-                existing_hashes.append(result["simhash"])
-                cleaned += 1
+                if status == "MEDIA_ONLY":
+                    media_only += 1
+                elif status == "SIMILAR":
+                    similar += 1
+                else:
+                    cleaned += 1
+
+            existing_hashes.append(result["simhash"])
 
             details.append({
                 "id": item["id"],
                 "platform": item["platform"],
                 "original": item["content_raw"],
                 "text": result["text"],
-                "status": "CLEANED" if not result["should_discard"] else "DISCARDED",
-                "noise_reason": result["noise_reason"],
+                "status": status,
+                "noise_reason": result.get("noise_reason", ""),
                 "noise_score": result.get("noise_score", 0),
-                "is_duplicate": result["is_duplicate"],
+                "is_duplicate": result.get("is_duplicate", False),
+                "is_similar": result.get("is_similar", False),
+                "similar_to": result.get("similar_to", ""),
+                "is_media_only": result.get("is_media_only", False),
+                "content_role": result.get("content_role", "unknown"),
             })
         except Exception as exc:
             errors.append(f"清理 raw_id={item['id']} 失败: {exc}")
@@ -981,6 +999,8 @@ def run_cleaning(raw_ids: list[int]) -> dict:
         "total": len(items),
         "cleaned": cleaned,
         "discarded": discarded,
+        "media_only": media_only,
+        "similar": similar,
         "details": details,
         "errors": errors,
     }

@@ -3,8 +3,9 @@
 BGI 实机演示一键脚本
 
 用法:
-  python scripts/demo.py start     # 启动Docker + 初始化 + 灌数据 + 启动UI
+  python scripts/demo.py start     # 启动Docker + 初始化 + 灌数据 + 启动UI（不自动清洗）
   python scripts/demo.py crawl     # 快速采集演示（1-2关键词）
+  python scripts/demo.py load      # 导入 example JSON 数据到数据库
   python scripts/demo.py persona   # 人物钓鱼演示
   python scripts/demo.py ui        # 仅启动UI（数据已就位）
   python scripts/demo.py full      # 完整流程：采集演示 + 人物演示 + UI
@@ -205,8 +206,8 @@ def demo_persona():
 
 def main():
     parser = argparse.ArgumentParser(description="BGI 演示脚本")
-    parser.add_argument("action", choices=["start", "crawl", "persona", "ui", "full"],
-                        help="start=初始化+灌数据+UI | crawl=采集演示 | persona=钓鱼演示 | ui=仅UI | full=完整流程")
+    parser.add_argument("action", choices=["start", "load", "crawl", "persona", "ui", "full"],
+                        help="start=初始化+灌数据+UI | load=导入示例数据 | crawl=采集演示 | persona=钓鱼演示 | ui=仅UI | full=完整流程")
     args = parser.parse_args()
 
     if args.action == "start":
@@ -215,8 +216,11 @@ def main():
         start_containers()
         init_database()
         load_examples()
-        run_quick_clean()
         start_ui()
+
+    elif args.action == "load":
+        load_examples()
+        print(f"  原始数据已入库 → 前往 UI 数据清洗页面批量清洗")
 
     elif args.action == "crawl":
         demo_crawl()
@@ -240,7 +244,6 @@ def main():
         start_containers()
         init_database()
         load_examples()
-        run_quick_clean()
 
         demo_crawl()
         demo_persona()

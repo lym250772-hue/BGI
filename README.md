@@ -4,6 +4,8 @@ BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析�
 
 当前版本的核心定位很明确：**把散落的黑灰产文本情报，自动变成可查询、可扩线、可复核的结构化线索库**。
 
+数据流程：原始数据导入 → UI清洗页面手动批量清洗 → ods_raw_intel → 自动研判 → 实体提取入库。各环节拆分为独立页面仅为展示处理过程。
+
 ## 1. 项目边界
 
 本项目覆盖采集 → 分析 → 展示的完整链路。
@@ -528,13 +530,16 @@ pip install -r requirements.txt
 启动基础设施：
 
 ```bash
-docker compose -f docker/docker-compose.yml --profile olap up -d
+docker compose -f docker/docker-compose.yml up -d
+# 如需 OLAP 分析（Doris），需能拉取 Docker Hub 镜像：
+# docker compose -f docker/docker-compose.yml --profile olap up -d
 ```
 
 初始化数据库：
 
 ```bash
-python main.py init-db
+python main.py init-db --reset    # --reset: 清空全部数据从零开始（答辩推荐）
+python main.py init-db            # 不加 --reset: 保留已有数据，增量迁移
 ```
 
 导入 JSONL 数据：

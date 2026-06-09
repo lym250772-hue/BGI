@@ -38,11 +38,29 @@ def cli():
 # ============================================================================
 
 @cli.command()
-def init_db():
+@click.option("--reset", is_flag=True, default=False,
+              help="DROP all tables before creating (clean start)")
+def init_db(reset: bool):
     """Initialize MySQL tables + Neo4j constraints + Milvus collections."""
     from storage.mysql_store import mysql
     from storage.neo4j_store import neo4j
     from storage.milvus_store import milvus
+
+    if reset:
+        logger.info("Dropping ALL data tables for clean start...")
+        with mysql.cursor() as c:
+            c.execute("SET FOREIGN_KEY_CHECKS=0")
+            for tbl in ["ods_raw_intel", "dwd_clean_intel", "dwd_intel_analysis",
+                         "dwd_entity", "dwd_entity_relation", "dim_slang_dict",
+                         "ads_risk_case", "agent_report", "annotation_log",
+                         "analysis_job", "raw_data", "analysis_results", "entities",
+                         "slang_dict", "cheat_scripts"]:
+                try:
+                    c.execute(f"DROP TABLE IF EXISTS {tbl}")
+                except Exception:
+                    pass
+            c.execute("SET FOREIGN_KEY_CHECKS=1")
+        logger.info("All tables dropped — starting clean")
 
     logger.info("Initializing MySQL (9-table ODS/DWD/DIM/ADS schema)...")
     mysql.init_tables()
@@ -86,6 +104,8 @@ def _normalize_status():
         "cleaned": STATUS_CLEANED,
         "analyzed": STATUS_ANALYZED,
         "discarded": STATUS_DISCARDED,
+        "SCREENED": STATUS_PENDING,       # 旧状态 → 重新走清洗管道
+        "screened": STATUS_PENDING,
     }
     with mysql.cursor() as c:
         for old, new in mapping.items():
@@ -93,7 +113,7 @@ def _normalize_status():
                 "UPDATE ods_raw_intel SET raw_status=%s WHERE raw_status=%s",
                 (new, old),
             )
-        logger.info("Status values normalized")
+        logger.info("Status values normalized (SCREENED → PENDING)")
 
 
 def _load_seed_slang():

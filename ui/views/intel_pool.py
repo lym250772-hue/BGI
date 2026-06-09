@@ -10,10 +10,7 @@ from ui.components import auto_refresh, empty_panel, page_header
 
 STATUS_OPTIONS = {
     "全部": None,
-    "待研判": "RAW_COLLECTED",
     "已清洗待研判": "CLEANED",
-    "研判中": "ANALYZING",
-    "已初筛": "SCREENED",
     "已研判": "ANALYZED",
     "研判失败": "FAILED",
     "已丢弃": "DISCARDED",
