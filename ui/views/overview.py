@@ -23,6 +23,7 @@ def _recent_table(rows: list[dict]) -> pd.DataFrame:
         {
             "情报ID": r.get("id"),
             "来源": r.get("source_platform") or "-",
+            "作者": r.get("author_name") or "-",
             "内容摘要": r.get("content_preview") or "",
             "处理状态": L.raw_status_label(r.get("raw_status")),
             "风险类型": r.get("risk_label") or "未分类",

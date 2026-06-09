@@ -629,8 +629,13 @@ class BaseSpider(ABC):
     def interactive_login(cls, headless: bool = False):
         """弹出浏览器让用户手动登录，登录完成后按 Enter 自动保存 Cookie。
 
-        用法:
-            python -c "from collectors.spiders.weibo_spider import WeiboSearchSpider; WeiboSearchSpider.interactive_login()"
+        用法（任意平台替换 Spider 类名即可）:
+            python -c "from collectors.spiders.weibo_api_spider import WeiboAPISpider; WeiboAPISpider.interactive_login()"
+            python -c "from collectors.spiders.zhihu_spider import ZhihuSearchSpider; ZhihuSearchSpider.interactive_login()"
+            python -c "from collectors.spiders.tieba_spider import TiebaSpider; TiebaSpider.interactive_login()"
+            python -c "from collectors.spiders.xiaohongshu_spider import XiaohongshuSearchSpider; XiaohongshuSearchSpider.interactive_login()"
+            python -c "from collectors.spiders.douyin_spider import DouyinSearchSpider; DouyinSearchSpider.interactive_login()"
+            python main.py login-xianyu  # 闲鱼走 v3 持久化浏览器，命令不同
 
         步骤:
             1. 打开浏览器 → 访问平台首页

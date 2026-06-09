@@ -34,7 +34,6 @@ ENTITY_TYPE_LABELS = {
     "phone": "手机号",
     "wechat": "微信号",
     "qq": "QQ号",
-    "telegram": "Telegram账号",
     "email": "邮箱",
     "url": "链接",
     "domain": "域名",

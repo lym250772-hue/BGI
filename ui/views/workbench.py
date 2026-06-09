@@ -69,8 +69,9 @@ def _query_int(name: str) -> int | None:
 
 
 def _option_label(row: dict) -> str:
+    author = row.get("author_name") or "-"
     return (
-        f"#{row['id']} [{row.get('source_platform') or '-'}] "
+        f"#{row['id']} [{row.get('source_platform') or '-'}] @{author} "
         f"{L.raw_status_label(row.get('raw_status'))} | {row.get('content_preview') or ''}"
     )
 
@@ -283,6 +284,7 @@ def show():
                 {raw_status_badge(selected.get('raw_status'))}
                 <span class='mono' style='color:{T.MUTED}'>#{raw_id}</span>
                 <span style='color:{T.MUTED}'>{selected.get('source_platform') or '-'}</span>
+                <span style='color:{T.MUTED}'>@{selected.get('author_name') or '-'}</span>
               </div>
               <div>{selected.get('content_raw') or ''}</div>
             </div>

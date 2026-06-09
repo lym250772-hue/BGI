@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import streamlit as st
 
 import ui.theme as T
-from ui.views import intel_pool, knowledge, overview, system_status, workbench
+from ui.views import collector, intel_pool, knowledge, overview, system_status, workbench
 
 
 st.set_page_config(
@@ -25,6 +25,7 @@ st.markdown(T.CSS, unsafe_allow_html=True)
 
 PAGES = {
     "overview": ("总览 / ChatBI", overview.show),
+    "collector": ("采集器管理", collector.show),
     "workbench": ("研判工作台", workbench.show),
     "intel_pool": ("情报池", intel_pool.show),
     "knowledge": ("知识库", knowledge.show),
