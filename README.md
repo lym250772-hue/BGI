@@ -8,7 +8,9 @@ BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析�
 
 本项目覆盖采集 → 分析 → 展示的完整链路。
 
-- 采集层：5 渠道已打通（微博/知乎/小红书/抖音/贴吧），纯 HTTP + Playwright 双模式，产出统一 IntelItem 格式。支持评论采集和图片/封面 URL 提取。**贴吧已从 Playwright 0.03条/秒提速至 HTTP JSON API ~10条/秒（300x）。**
+- 采集层：**7 品类已打通** — 内容平台（微博/知乎/小红书/抖音/贴吧）+ 二手/众包（闲鱼）+ 社交IM（QQ群），纯 HTTP + Playwright + WebSocket 多模式，产出统一 IntelItem 格式。支持评论采集、图片/封面 URL 提取、QQ群双模式采集（被动监听+主动拉取历史）。**贴吧已从 Playwright 0.03条/秒提速至 HTTP JSON API ~10条/秒（300x）。** **Telegram 已于 v4.2 停用。**
+12	- 🆕 **主动情报收集**: AI人物钓鱼 Skill（Persona Engine），LLM驱动虚拟人物对话，安全护栏保障合规。
+13	
 - 分析层：接收结构化数据，写入 MySQL，执行清洗、分类、实体抽取、黑话研判、图谱扩线、Doris 聚合和前端展示。
 - OCR/ASR：代码结构允许接入，图文 OCR 管道已实现（PaddleOCR）。
 - Java/Spring Boot：当前项目没有 Java 后端，控制面由 Python + FastAPI + Streamlit 承担。
@@ -17,9 +19,10 @@ BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析�
 
 | 模块 | 当前状态 | 说明 |
 |---|---:|---|
-| **数据采集** | **已实现** | **5/6 渠道打通（微博/知乎/小红书/抖音/贴吧），纯HTTP+Playwright双模式，~8条/秒(微博)，含评论/图片采集** |
-| 示例数据 | 已提供 | `examples/` 含 5 平台 1,076 条真实黑灰产样本（含评论/答案/图片） |
-| 结构化数据接入 | 已实现 | `scripts/importers/import_partner_jsonl.py` 支持队友 JSONL 导入、字段校验、去重入库 |
+| **数据采集** | **已实现** | **7品类打通: 内容平台(5)+二手/众包(闲鱼)+社交IM(QQ群)+人物钓鱼(Persona)，纯HTTP+Playwright+WebSocket多模式** |
+| 🆕 **主动情报 (Persona)** | **已实现** | **3个AI人物Profile，LLM驱动钓鱼对话，安全护栏保障合规，Phase 1: LLM模拟测试** |
+| 示例数据 | 已提供 | `examples/` 含 7 品类 10,248 条真实黑灰产样本（含评论/答案/图片） |
+| 结构化数据接入 | 已实现 | `scripts/importers/import_partner_jsonl.py` 支持 JSONL 导入、字段校验、去重入库 |
 | 清洗去重 | 已实现 | HTML 剥离、空白规范化、SimHash 去重、噪声过滤、高危关键词标记 |
 | 风险分类 | 已实现 | L1 规则优先，L2 RoBERTa 接口预留，L3 LLM 兜底，支持降级 |
 | 实体抽取 | 已实现 | 正则、黑话词典、Milvus 相似检索、LLM 结构化抽取四级级联 |
@@ -38,7 +41,7 @@ BGI 是一个面向比赛演示和反欺诈业务验证的黑灰产情报分析�
 
 ```mermaid
 flowchart LR
-    A["多源采集\n5平台/1,076条样本"] --> B["数据接入\nimport_partner_jsonl.py\n或 main.py collect"]
+    A["多源采集\n7品类/10,248条目"] --> B["数据接入\nimport_partner_jsonl.py\n或 main.py collect"]
     B --> C["MySQL ODS\nods_raw_intel"]
     C --> D["清洗去重\ncleaner.pipeline"]
     D --> E["Agent 状态机\nanalyzer.state_machine"]
@@ -72,7 +75,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    S["RAW_COLLECTED\n队友数据已接收"] --> C["CLEANED\n文本清洗与去重完成"]
+    S["RAW_COLLECTED\n采集数据已入库"] --> C["CLEANED\n文本清洗与去重完成"]
     C --> Q["ANALYZING\n异步任务研判中"]
     Q --> A["ANALYZED\n研判成功"]
     Q --> F["FAILED\n研判失败，可重试"]
@@ -89,15 +92,15 @@ flowchart TD
 
 ## 5. 一条数据如何被处理
 
-队友交付示例：
+数据示例：
 
 ```json
 {
-  "platform": "telegram",
-  "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 douyin_pro888。工具下载 https://linktr.ee/douyin_pro",
+  "platform": "zhihu",
+  "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 example_001。工具下载 https://example.com/tools",
   "content_type": "text",
-  "source_url": "https://t.me/直播技术/24305904",
-  "author_uid": "906341966",
+  "source_url": "https://www.zhihu.com/question/123456789",
+  "author_uid": "10000001",
   "author_username": "外挂脚本",
   "group_id": "直播技术",
   "collected_at": "2026-05-18T12:33:35",
@@ -106,7 +109,7 @@ flowchart TD
     "has_image": false,
     "has_video": false,
     "is_long_text": false,
-    "message_id": 24305904
+    "message_id": 10001
   }
 }
 ```
@@ -120,7 +123,7 @@ flowchart TD
 处理逻辑：
 
 1. 校验必填字段：`platform`、`content_raw`、`content_type`、`collected_at`。
-2. 将队友字段映射为系统字段，例如 `author_uid -> author_id`、`author_username -> author_name`。
+2. 将外部字段映射为系统字段，例如 `author_uid -> author_id`、`author_username -> author_name`。
 3. 按 `source_platform + source_url` 或 `message_id` 做幂等检查。
 4. 写入 MySQL `ods_raw_intel`，状态为 `RAW_COLLECTED`。
 
@@ -128,12 +131,12 @@ flowchart TD
 
 ```json
 {
-  "source_platform": "telegram",
+  "source_platform": "zhihu",
   "source_channel": "直播技术",
-  "source_url": "https://t.me/直播技术/24305904",
-  "author_id": "906341966",
+  "source_url": "https://www.zhihu.com/question/123456789",
+  "author_id": "10000001",
   "author_name": "外挂脚本",
-  "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 douyin_pro888。工具下载 https://linktr.ee/douyin_pro",
+  "content_raw": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 example_001。工具下载 https://example.com/tools",
   "raw_status": "RAW_COLLECTED"
 }
 ```
@@ -154,7 +157,7 @@ flowchart TD
 
 ```json
 {
-  "text": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 douyin_pro888。工具下载 https://linktr.ee/douyin_pro",
+  "text": "抖音无人直播技术，全套教程+工具，包教包会。详情看主页，联系微信 example_001。工具下载 https://example.com/tools",
   "simhash": "0x8f4a...",
   "is_duplicate": false,
   "is_noise": false,
@@ -235,13 +238,13 @@ flowchart LR
 [
   {
     "entity_type": "wechat",
-    "entity_value": "douyin_pro888",
+    "entity_value": "example_001",
     "extraction_method": "regex",
-    "context": "详情看主页，联系微信 douyin_pro888。工具下载"
+    "context": "详情看主页，联系微信 example_001。工具下载"
   },
   {
     "entity_type": "url",
-    "entity_value": "https://linktr.ee/douyin_pro",
+    "entity_value": "https://example.com/tools",
     "extraction_method": "regex"
   },
   {
@@ -283,14 +286,14 @@ flowchart LR
 ```json
 [
   {
-    "text": "联系微信 douyin_pro888",
+    "text": "联系微信 example_001",
     "risk_point": "站外联系方式",
     "reason": "出现明确导流账号",
     "confidence": 0.95,
     "method": "entity_context"
   },
   {
-    "text": "工具下载 https://linktr.ee/douyin_pro",
+    "text": "工具下载 https://example.com/tools",
     "risk_point": "外链工具分发",
     "reason": "出现工具下载链接",
     "confidence": 0.92,
@@ -325,7 +328,7 @@ flowchart LR
 
 | 节点 | 含义 | 示例 |
 |---|---|---|
-| `Intel` | 一条原始情报 | `raw_id=24305904` |
+| `Intel` | 一条原始情报 | `raw_id=10001` |
 | `Account` | 黑灰产账号 | 微信、QQ、Telegram、支付宝 |
 | `Contact` | 联系或收款载体 | 手机号、邮箱、银行卡 |
 | `Link` | 链接资产 | URL、域名、IP |
@@ -348,11 +351,11 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    I["Intel#24305904"] -->|USES_ACCOUNT| A["Account: douyin_pro888"]
+    I["Intel#10001"] -->|USES_ACCOUNT| A["Account: example_001"]
     I -->|PROMOTES_LINK| L["Link: linktr.ee"]
     I -->|PROMOTES_TOOL| T["Tool: 抖音无人直播技术"]
-    A -->|CO_OCCURS raw_id=24305904| L
-    A -->|CO_OCCURS raw_id=24305904| T
+    A -->|CO_OCCURS raw_id=10001| L
+    A -->|CO_OCCURS raw_id=10001| T
 ```
 
 图谱扩线的目的不是展示一张巨大乱图，而是回答三个问题：
@@ -382,7 +385,7 @@ MySQL 是系统主库。
 
 | 表 | 用途 |
 |---|---|
-| `ods_raw_intel` | 原始情报表，保存队友交付的结构化数据和处理状态 |
+| `ods_raw_intel` | 原始情报表，保存多源采集的结构化数据和处理状态 |
 | `dwd_clean_intel` | 清洗结果表，保存 clean_text、simhash、去重状态 |
 | `dwd_intel_analysis` | 研判结果表，保存风险分类、评分、证据、摘要 |
 | `dwd_entity` | 实体库，保存账号、链接、黑话、工具等 |
@@ -478,7 +481,7 @@ python main.py api
 进入项目目录：
 
 ```bash
-cd "C:\Users\刘一鸣\OneDrive\Desktop\BAGI Intelligence Analysis\BGI"
+cd /path/to/BGI
 ```
 
 安装依赖：
@@ -499,7 +502,7 @@ docker compose -f docker/docker-compose.yml --profile olap up -d
 python main.py init-db
 ```
 
-导入队友 JSONL：
+导入 JSONL 数据：
 
 ```bash
 python scripts/importers/import_partner_jsonl.py data/partner/demo.jsonl --status RAW_COLLECTED
@@ -533,6 +536,14 @@ python main.py api --host 0.0.0.0 --port 8000
 
 ```bash
 python -m pytest tests -q
+```
+
+AI人物钓鱼：
+
+```bash
+python main.py persona list                                                       # 列出可用人物
+python main.py persona run -p ecommerce_buyer -t "platform:uid:name:context"      # 单目标对话
+python main.py persona run-batch -p ecommerce_buyer -f targets.json -o results.json  # 批量对话
 ```
 
 训练 RoBERTa 分类模型：
@@ -587,13 +598,12 @@ BGI/
 ├── analyzer/                # 分类、实体抽取、证据、评分、状态机、异步 worker
 ├── api/                     # FastAPI 接口
 ├── cleaner/                 # 文本清洗、SimHash 去重
-├── collectors/              # 多源数据采集层（5平台已打通，6 Spider + 5 Collector）
+├── collectors/              # 多源数据采集层（7品类已打通，10 Spider + 7 Collector）
 ├── config/                  # 配置与风险规则
 ├── data/                    # 模型、词典、样例数据
 ├── docker/                  # MySQL、Neo4j、Milvus、MinIO、Doris 编排
 ├── scripts/
 │   ├── crawl/               # 采集 smoke 测试
-│   ├── data/                # mock 数据生成
 │   ├── demo/                # 单条演示脚本
 │   ├── importers/           # JSONL、黑话词典导入
 │   └── modeling/            # RoBERTa 训练脚本
@@ -609,7 +619,7 @@ BGI/
 
 推荐演示顺序：
 
-1. 在“情报池”展示队友导入的多平台情报，说明数据源已经统一进入 `RAW_COLLECTED`。
+1. 在”情报池”展示多平台情报，说明数据源已经统一进入 `RAW_COLLECTED`。
 2. 批量提交 10 到 20 条待研判情报，展示异步任务不会卡住页面。
 3. 在“研判工作台”打开一条典型黑话情报，展示风险分类、实体、证据、黑话归一、候选新黑话。
 4. 在“知识库”查看实体和候选黑话，说明系统具备数据飞轮和人工复核入口。
@@ -621,7 +631,7 @@ BGI/
 | 问题 | 影响 | 建议 |
 |---|---|---|
 | L2 小模型未必已训练完成 | 大量规则外样本会落到 LLM，速度和成本受影响 | 使用 4090 训练 RoBERTa/MacBERT，并把验证集 F1 写入答辩材料 |
-| OCR/ASR 不是当前主链路 | 图片、语音黑话无法完整覆盖 | 要求队友把 OCR/ASR 文本作为 `metadata.ocr_text/asr_text` 或单独字段交付 |
+| OCR/ASR 不是当前主链路 | 图片、语音黑话无法完整覆盖 | 后续可将 OCR/ASR 文本作为 `metadata.ocr_text/asr_text` 或单独字段交付 |
 | 候选黑话需要更强 HITL | 新词可以发现，但人工确认流程还可以更顺 | 前端增加“通过/驳回/编辑释义”后自动刷新词典和 Milvus |
 | 图谱扩线仍偏数据驱动 | 小样本时图谱冲击力有限 | 准备一组共享微信、手机号、域名的演示数据，突出团伙关联 |
 | Doris 与 MySQL 可能存在历史不同步 | 重跑或中断后宽表计数可能不一致 | 增加一键 Doris 重建脚本，从 MySQL 最新研判结果回灌宽表 |

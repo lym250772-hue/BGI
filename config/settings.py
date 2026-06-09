@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     weibo_cookies: str = ""
     tieba_cookies: str = ""
     zhihu_cookies: str = ""
+    douyin_cookies: str = ""
+    xiaohongshu_cookies: str = ""
 
     # --- Cleaning ---
     simhash_threshold: int = 3  # hamming distance <= 3 = duplicate

@@ -31,11 +31,29 @@ def _table(rows: list[dict]) -> pd.DataFrame:
             "处理状态": L.raw_status_label(r.get("raw_status")),
             "风险": (r.get("risk_label") or "未分类")
             + (f" / {r.get('risk_sub_label')}" if r.get("risk_sub_label") else ""),
-            "风险分": f"{float(r.get('risk_score') or 0):.2f}" if r.get("risk_score") is not None else "-",
+            "风险分": (
+                f"{float(r.get('risk_score') or 0):.2f}"
+                if r.get("risk_score") is not None else "-"
+            ),
             "判定方式": L.classification_method_label(r.get("classification_method") or ""),
             "接收时间": str(r.get("collect_time") or "")[:19],
         }
         for r in rows
+    ])
+
+
+def _jobs_table(rows: list[dict]) -> pd.DataFrame:
+    return pd.DataFrame([
+        {
+            "任务ID": j.get("job_id"),
+            "情报ID": j.get("raw_id"),
+            "状态": L.job_status_label(j.get("status")),
+            "进度": f"{j.get('progress') or 0}%",
+            "当前步骤": j.get("current_step") or "-",
+            "错误": (j.get("error_message") or "")[:80],
+            "创建时间": str(j.get("created_at") or "")[:19],
+        }
+        for j in rows
     ])
 
 
@@ -44,7 +62,7 @@ def show():
     page_header(
         "Intel Pool",
         "情报池",
-        "查看所有已接收的结构化数据，并按状态批量提交后台研判。",
+        "查看已接收的结构化数据，并按状态批量提交后台研判。",
     )
 
     c1, c2, c3, c4 = st.columns([1, 1, 1.7, 0.8])
@@ -58,13 +76,18 @@ def show():
         batch_size = st.number_input("批量数", min_value=1, max_value=50, value=10, step=1)
 
     rows = data.list_intel(status=STATUS_OPTIONS[status_label], keyword=keyword, limit=int(limit))
-
     eligible = [r for r in rows if r.get("raw_status") in ("RAW_COLLECTED", "CLEANED", "FAILED")]
+
     b1, b2, b3 = st.columns([1, 1, 2])
     b1.metric("当前结果", len(rows))
     b2.metric("可提交", len(eligible))
     with b3:
-        if st.button("提交当前筛选到后台队列", type="primary", disabled=not eligible, width="stretch"):
+        if st.button(
+            "提交当前筛选到后台队列",
+            type="primary",
+            disabled=not eligible,
+            use_container_width=True,
+        ):
             job_ids = data.submit_batch_jobs(
                 eligible,
                 options={
@@ -87,7 +110,7 @@ def show():
         st.dataframe(
             _table(rows),
             hide_index=True,
-            width="stretch",
+            use_container_width=True,
             column_config={
                 "情报ID": st.column_config.NumberColumn(width="small"),
                 "内容摘要": st.column_config.TextColumn(width="large"),
@@ -98,19 +121,7 @@ def show():
     st.markdown("### 后台任务")
     jobs = data.list_jobs(limit=12)
     if jobs:
-        job_df = pd.DataFrame([
-            {
-                "任务ID": j.get("job_id"),
-                "情报ID": j.get("raw_id"),
-                "状态": L.job_status_label(j.get("status")),
-                "进度": f"{j.get('progress') or 0}%",
-                "当前步骤": j.get("current_step") or "-",
-                "错误": (j.get("error_message") or "")[:80],
-                "创建时间": str(j.get("created_at") or "")[:19],
-            }
-            for j in jobs
-        ])
-        st.dataframe(job_df, hide_index=True, width="stretch")
+        st.dataframe(_jobs_table(jobs), hide_index=True, use_container_width=True)
     else:
         st.info("暂无后台任务。")
 

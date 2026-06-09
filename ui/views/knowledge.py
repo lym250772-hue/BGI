@@ -15,7 +15,7 @@ def _entities_tab():
             {"线索类型": L.entity_type_label(r["entity_type"]), "数量": r["cnt"]}
             for r in counts
         ])
-        st.dataframe(stat_df, hide_index=True, width="stretch")
+        st.dataframe(stat_df, hide_index=True, use_container_width=True)
 
     type_values = [r["entity_type"] for r in counts]
     label_to_type = {"全部": None, **{L.entity_type_label(t): t for t in type_values}}
@@ -37,7 +37,7 @@ def _entities_tab():
         }
         for r in rows
     ])
-    st.dataframe(df, hide_index=True, width="stretch")
+    st.dataframe(df, hide_index=True, use_container_width=True)
 
 
 def _slang_tab():
@@ -64,11 +64,11 @@ def _slang_tab():
                     new_meaning = st.text_area("确认释义", value=meaning, key=f"slang_meaning_{idx}", height=90)
                     new_category = st.text_input("风险分类", value=category, key=f"slang_category_{idx}")
                     a, b = st.columns(2)
-                    if a.button("加入词典", key=f"approve_{idx}", width="stretch"):
+                    if a.button("加入词典", key=f"approve_{idx}", use_container_width=True):
                         data.approve_slang(term, new_meaning, category=new_category)
                         st.success(f"已加入词典：{term}")
                         st.rerun()
-                    if b.button("忽略", key=f"reject_{idx}", width="stretch"):
+                    if b.button("忽略", key=f"reject_{idx}", use_container_width=True):
                         data.reject_slang(term, reason="人工忽略")
                         st.info(f"已忽略：{term}")
                         st.rerun()
@@ -89,7 +89,7 @@ def _slang_tab():
             }
             for r in rows
         ])
-        st.dataframe(df, hide_index=True, width="stretch")
+        st.dataframe(df, hide_index=True, use_container_width=True)
 
 
 def _graph_tab():
@@ -98,33 +98,31 @@ def _graph_tab():
     with c1:
         entity_type = st.selectbox(
             "实体类型",
-            ["wechat", "phone", "telegram", "qq", "url", "domain", "tool", "slang", "crypto_wallet"],
-            format_func=L.entity_type_label,
-        )
+            ["wechat", "phone", "qq", "url", "domain", "tool", "slang", "crypto_wallet"],
+            format_func=L.entity_type_label)
     with c2:
         value = st.text_input("实体值", placeholder="例如 douyin_pro888 / example.com / 跑分")
     with c3:
         depth = st.number_input("跳数", min_value=1, max_value=3, value=2)
 
-    if st.button("查询关联关系", type="primary", disabled=not value, width="stretch"):
+    if st.button("查询关联关系", type="primary", disabled=not value, use_container_width=True):
         rows = data.graph_neighbors(entity_type, value, depth=int(depth))
         st.session_state.graph_rows = rows
 
     rows = st.session_state.get("graph_rows", [])
     if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
     elif value:
         st.info("点击查询后会显示关联节点。")
     else:
-        empty_panel("输入实体开始扩线", "建议从微信号、手机号、Telegram 账号、域名或工具名开始。")
+        empty_panel("输入实体开始扩线", "建议从微信号、手机号、QQ号、域名或工具名开始。")
 
 
 def show():
     page_header(
         "Knowledge Base",
         "知识库",
-        "实体线索、黑话词典与关系扩线集中管理；这里是研判结果沉淀后的资产层。",
-    )
+        "实体线索、黑话词典与关系扩线集中管理；这里是研判结果沉淀后的资产层。")
     tab_entities, tab_slang, tab_graph = st.tabs(["实体线索", "黑话词典", "关系扩线"])
     with tab_entities:
         _entities_tab()

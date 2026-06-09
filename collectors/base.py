@@ -21,7 +21,7 @@ class IntelItem:
     """
 
     # ── 核心字段 ──
-    platform: str           # 来源平台: weibo / tieba / zhihu / telegram / xiaohongshu / forum
+    platform: str           # 来源平台: weibo / tieba / zhihu / xiaohongshu / douyin / xianyu / qq_group
     content_raw: str        # 原始正文（保留原文，不去除任何内容）
     content_type: str = "text"  # text / image / video / audio
     source_url: str = ""    # 原文链接
@@ -76,11 +76,44 @@ class IntelItem:
     xiaohongshu: {note_id, tags_original}
     """
 
+    # ── 市场平台扩展字段（闲鱼等二手/众包平台）──
+    price: float = 0.0
+    """商品/服务价格（CNY），仅二手/众包平台使用"""
+    seller_rating: str = ""
+    """卖家信用评级（如芝麻信用），仅市场平台使用"""
+    location: str = ""
+    """卖家所在地/IP属地"""
+    listing_status: str = ""
+    """商品状态: active(在售) / sold(已售) / deleted(已删除)"""
+
     # ── 媒体 ──
     image_urls: list[str] = field(default_factory=list)
     """图片链接列表（小红书图集、抖音封面等）"""
     video_cover_url: str = ""
     """视频封面链接（抖音等）"""
+
+
+@dataclass
+class IMMessageItem:
+    """即时通讯消息条目 — QQ群聊/微信群的统一消息格式。
+
+    用于社交IM平台的消息采集，与 IntelItem（用于内容平台帖子/评论）互补。
+    通过 im_to_intel() 转换器可合并到统一存储流水线。
+    """
+    platform: str = "qq_group"
+    group_id: str = ""          # 群号
+    group_name: str = ""        # 群名称
+    sender_uid: str = ""        # 发送者QQ号
+    sender_nickname: str = ""   # 发送者昵称
+    content_raw: str = ""       # 消息内容
+    content_type: str = "text"  # text / image / file / video
+    message_id: str = ""        # 消息ID (msgSeq)
+    reply_to_id: str = ""       # 回复消息ID
+    collected_at: datetime = field(default_factory=datetime.utcnow)
+    image_urls: list[str] = field(default_factory=list)
+    images: list[dict] = field(default_factory=list)
+    """图片/动图/表情包: [{"type": "image/mface/face", "url": "..."}]"""
+    metadata: dict = field(default_factory=dict)
 
 
 class BaseCollector(ABC):

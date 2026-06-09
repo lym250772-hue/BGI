@@ -685,7 +685,7 @@ class AnalysisAgent:
                 pre_types.add(etype.value if hasattr(etype, "value") else str(etype))
             high_value_hit = pre_types & {
                 "wechat", "qq", "phone", "url", "domain", "bank_card", "alipay",
-                "telegram", "email", "crypto_wallet", "slang", "tool",
+                "email", "crypto_wallet", "slang", "tool",
             }
             if classification_confidence >= 0.9 and pre_entities:
                 entities = pre_entities
@@ -803,8 +803,7 @@ class AnalysisAgent:
                 risk_label=risk_label,
                 entities=entities,
                 risk_sub_label=risk_sub_label,
-                enable_llm=state.get("enable_llm", True) and not self._circuit_open,
-            )
+                enable_llm=state.get("enable_llm", True) and not self._circuit_open)
         except Exception as exc:
             logger.warning(f"Evidence extraction failed, using entity context: {exc}")
             from analyzer.evidence_extractor import evidence_extractor
@@ -889,8 +888,7 @@ class AnalysisAgent:
                 classification=cls_result,
                 entities=state["entities"],
                 graph_result=state["graph_result"],
-                slang_terms=state["slang_terms"],
-            )
+                slang_terms=state["slang_terms"])
             state["risk_score"] = scores["final_score"]
             state["risk_level"] = scores["risk_level"]
         except Exception as exc:
@@ -1016,12 +1014,10 @@ class AnalysisAgent:
                               else str(e["entity_type"])),
                       "value": e["entity_value"]}
                      for e in entities[:20]],
-                    ensure_ascii=False,
-                ),
+                    ensure_ascii=False),
                 related_intel_count=graph_result.get("related_entities_count", 0),
                 first_seen=graph_result.get("first_seen"),
-                last_seen=graph_result.get("last_seen"),
-            )
+                last_seen=graph_result.get("last_seen"))
 
         # Neo4j
         self._sync_neo4j(raw_id, platform, text, entities)
@@ -1055,8 +1051,7 @@ class AnalysisAgent:
             with _m.cursor() as c:
                 c.execute(
                     "SELECT collect_time, source_url, author_id, source_channel FROM ods_raw_intel WHERE id=%s",
-                    (raw_id,),
-                )
+                    (raw_id))
                 row = c.fetchone()
                 if row:
                     collect_time = row.get("collect_time")
@@ -1166,8 +1161,7 @@ class AnalysisAgent:
                     neo.link_co_occurrence_refined(
                         et_i_str, entities[i]["entity_value"],
                         et_j_str, entities[j]["entity_value"],
-                        raw_data_id,
-                    )
+                        raw_data_id)
         except Exception as exc:
             logger.error(f"Neo4j sync failed [{raw_data_id}]: {exc}")
 

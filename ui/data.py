@@ -218,8 +218,7 @@ def daily_trend(days: int = 7) -> list[dict]:
                          DATE_SUB(DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR)), INTERVAL %s DAY)
                    GROUP BY DATE(DATE_ADD(created_at, INTERVAL 8 HOUR))
                    ORDER BY dt""",
-                (days,),
-            )
+                (days))
             return [dict(r) for r in c.fetchall()]
     except Exception:
         return []
@@ -230,7 +229,7 @@ def daily_trend(days: int = 7) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 _PLATFORM_ALIASES = {
-    "telegram": ["telegram", "tg", "飞机", "电报"],
+    "telegram": ["tg", "飞机", "电报"],
     "tieba": ["tieba", "贴吧"],
     "weibo": ["weibo", "微博"],
     "zhihu": ["zhihu", "知乎"],
@@ -298,8 +297,7 @@ def _chatbi_risk_distribution(platform: str | None, days: int | None) -> dict:
                     GROUP BY risk_label
                     ORDER BY cnt DESC
                     LIMIT 12""",
-                params,
-            )
+                params)
             rows = [dict(r) for r in c.fetchall()]
         source = "Doris"
     else:
@@ -317,8 +315,7 @@ def _chatbi_risk_distribution(platform: str | None, days: int | None) -> dict:
                     GROUP BY a.risk_label
                     ORDER BY cnt DESC
                     LIMIT 12""",
-                params,
-            )
+                params)
             rows = [dict(r) for r in c.fetchall()]
         source = "MySQL"
 
@@ -361,8 +358,7 @@ def _chatbi_platform_distribution(days: int | None, focus_high: bool = False) ->
                     GROUP BY platform
                     ORDER BY {order_expr}
                     LIMIT 12""",
-                params,
-            )
+                params)
             rows = [dict(r) for r in c.fetchall()]
         source = "Doris"
     else:
@@ -380,8 +376,7 @@ def _chatbi_platform_distribution(days: int | None, focus_high: bool = False) ->
                     GROUP BY o.source_platform
                     ORDER BY {order_expr}
                     LIMIT 12""",
-                params,
-            )
+                params)
             rows = [dict(r) for r in c.fetchall()]
         source = "MySQL"
 
@@ -424,8 +419,7 @@ def _chatbi_high_risk(platform: str | None, days: int | None) -> dict:
                     ORDER BY CASE risk_level WHEN 'critical' THEN 4 WHEN 'high' THEN 3 ELSE 1 END DESC,
                              risk_score DESC, raw_id DESC
                     LIMIT 10""",
-                params,
-            )
+                params)
             rows = [dict(r) for r in c.fetchall()]
         source = "Doris"
     else:
@@ -442,8 +436,7 @@ def _chatbi_high_risk(platform: str | None, days: int | None) -> dict:
                     ORDER BY CASE a.risk_level WHEN 'critical' THEN 4 WHEN 'high' THEN 3 ELSE 1 END DESC,
                              a.risk_score DESC, o.id DESC
                     LIMIT 10""",
-                params,
-            )
+                params)
             rows = [dict(r) for r in c.fetchall()]
         source = "MySQL"
     answer = "没有查到高危样本。"
@@ -478,8 +471,7 @@ def _chatbi_hot_slang(platform: str | None, days: int | None) -> dict:
                 GROUP BY e.entity_value
                 ORDER BY cnt DESC
                 LIMIT 15""",
-            params,
-        )
+            params)
         rows = [dict(r) for r in c.fetchall()]
     answer = "没有查到黑话命中记录。"
     if rows:
@@ -511,8 +503,7 @@ def _chatbi_entity_distribution(platform: str | None, days: int | None) -> dict:
                 GROUP BY e.entity_type
                 ORDER BY cnt DESC
                 LIMIT 15""",
-            params,
-        )
+            params)
         rows = [dict(r) for r in c.fetchall()]
     answer = "没有查到实体线索数据。"
     if rows:
@@ -621,8 +612,7 @@ def chatbi_answer(question: str) -> dict:
                 {"示例问题": "哪个平台高危情报最多？"},
                 {"示例问题": "最近 30 天热门黑话有哪些？"},
                 {"示例问题": "给我 10 条高危典型样本。"},
-                {"示例问题": "当前待研判队列还有多少？"},
-            ],
+                {"示例问题": "当前待研判队列还有多少？"}],
             "chart": "table",
         }
 
@@ -682,8 +672,7 @@ def list_intel(
                 ORDER BY {order_sql}
                 LIMIT %s
                 """,
-                params,
-            )
+                params)
             rows = [dict(r) for r in c.fetchall()]
         for row in rows:
             row["content_preview"] = _truncate(row.get("content_raw"), 150)
@@ -738,8 +727,7 @@ def submit_batch_jobs(rows: list[dict], options: dict | None = None, max_items: 
                 raw_id=raw_id,
                 text=text,
                 platform=row.get("source_platform") or "unknown",
-                options=options,
-            )
+                options=options)
         )
     return job_ids
 
@@ -790,8 +778,7 @@ def list_entities(limit: int = 300, entity_type: str | None = None) -> list[dict
                     {clause}
                     ORDER BY first_seen DESC, id DESC
                     LIMIT %s""",
-                params,
-            )
+                params)
             return [dict(r) for r in c.fetchall()]
     except Exception:
         return []
@@ -821,8 +808,7 @@ def list_slang(status: str = "candidate", limit: int = 200) -> list[dict]:
                    WHERE status=%s
                    ORDER BY updated_at DESC
                    LIMIT %s""",
-                (status, limit),
-            )
+                (status, limit))
             rows = [dict(r) for r in c.fetchall()]
         for row in rows:
             row.setdefault("suggested_meaning", row.get("normalized_meaning"))

@@ -9,7 +9,6 @@ from ui import data
 from ui.components import (
     auto_refresh,
     empty_panel,
-    job_status_badge,
     page_header,
     raw_status_badge,
     risk_badge,
@@ -27,7 +26,7 @@ STATUS_OPTIONS = {
 
 MODE_OPTIONS = {
     "快速筛查": {
-        "desc": "规则和已有词典优先，关闭 LLM、向量检索与图谱扩线；结果标记为已初筛，可继续升级标准研判。",
+        "desc": "规则和已有词典优先，关闭 LLM、向量检索与图谱扩线；结果标记为已初筛，可继续升级为标准研判。",
         "options": {
             "enable_llm": False,
             "enable_roberta": False,
@@ -47,7 +46,7 @@ MODE_OPTIONS = {
         },
     },
     "扩线研判": {
-        "desc": "启用向量相似检索与 Neo4j 扩线；只对账号、链接、联系方式明确的样本有增量，否则会自动跳过扩线。",
+        "desc": "启用向量相似检索与 Neo4j 扩线；只对账号、链接、联系方式明确的样本有增量。",
         "options": {
             "enable_llm": True,
             "enable_roberta": True,
@@ -78,6 +77,10 @@ def _option_label(row: dict) -> str:
 
 def _render_result(raw_id: int):
     result = data.get_analysis_bundle(raw_id)
+    if not result:
+        empty_panel("尚未完成研判", "提交后台任务后，任务完成会自动写回 MySQL、Neo4j、Milvus 和 Doris。")
+        return
+
     risk_label = result.get("risk_label") or "未分类"
     score = float(result.get("risk_score") or 0)
 
@@ -112,7 +115,7 @@ def _render_result(raw_id: int):
                 unsafe_allow_html=True,
             )
     else:
-        st.info("暂无证据片段，可能是未研判或降级路径未产出。")
+        st.info("暂无证据片段。可能是规则路径未产生证据，或样本风险较低。")
 
     st.markdown("### 历史相似情报")
     similar_rows = result.get("similar_intel") or []
@@ -140,9 +143,9 @@ def _render_result(raw_id: int):
             }
             for r in similar_rows[:8]
         ])
-        st.dataframe(df, hide_index=True, width="stretch")
+        st.dataframe(df, hide_index=True, use_container_width=True)
     else:
-        st.info("暂无历史相似情报。可能是首次出现、Milvus 暂无历史向量，或当前样本置信度较低导致相似检索被跳过。")
+        st.info("暂无历史相似情报。快速筛查和标准研判默认不启用向量检索，扩线研判才会尝试召回历史相似样本。")
 
     left, right = st.columns([1.1, 1])
     with left:
@@ -159,7 +162,7 @@ def _render_result(raw_id: int):
                 }
                 for e in entities
             ])
-            st.dataframe(df, hide_index=True, width="stretch")
+            st.dataframe(df, hide_index=True, use_container_width=True)
         else:
             st.info("暂无实体。")
 
@@ -204,7 +207,7 @@ def _jobs_table():
         }
         for r in rows
     ])
-    st.dataframe(df, hide_index=True, width="stretch")
+    st.dataframe(df, hide_index=True, use_container_width=True)
     return rows
 
 
@@ -243,7 +246,7 @@ def show():
     page_header(
         "Analysis Workbench",
         "研判工作台",
-        "从待研判队列选择情报，提交后台任务；页面不阻塞，可以连续处理多条黑话数据。",
+        "从队列选择情报并提交后台研判；页面不阻塞，可以连续处理多条黑话数据。",
     )
 
     q1, q2, q3 = st.columns([1, 1, 1.4])
@@ -271,25 +274,26 @@ def show():
     raw_id = int(options[selected_label])
     selected = next(r for r in rows if int(r["id"]) == raw_id)
 
-    st.markdown(
-        f"""
-        <div class='intel-card'>
-          <div style='display:flex;gap:8px;align-items:center;margin-bottom:8px'>
-            {raw_status_badge(selected.get('raw_status'))}
-            <span class='mono' style='color:{T.MUTED}'>#{raw_id}</span>
-            <span style='color:{T.MUTED}'>{selected.get('source_platform') or '-'}</span>
-          </div>
-          <div>{selected.get('content_raw') or ''}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    submit_left, submit_right = st.columns([2, 1])
-    with submit_left:
-        st.caption("提交后台任务后可以继续切换其他情报；任务完成后结果会自动写回。")
-    with submit_right:
-        if st.button("提交研判任务", type="primary", width="stretch", key="submit_job"):
+    top_left, top_right = st.columns([1.15, 0.85])
+    with top_left:
+        st.markdown(
+            f"""
+            <div class='intel-card'>
+              <div style='display:flex;gap:8px;align-items:center;margin-bottom:8px'>
+                {raw_status_badge(selected.get('raw_status'))}
+                <span class='mono' style='color:{T.MUTED}'>#{raw_id}</span>
+                <span style='color:{T.MUTED}'>{selected.get('source_platform') or '-'}</span>
+              </div>
+              <div>{selected.get('content_raw') or ''}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with top_right:
+        st.markdown("<div class='bagi-panel'>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>提交后台研判</div>", unsafe_allow_html=True)
+        st.caption("不会阻塞页面。提交后可以继续切换其他情报。")
+        if st.button("提交研判任务", type="primary", use_container_width=True, key="submit_job"):
             text = data.preferred_text(raw_id, fallback=selected.get("content_raw") or "")
             job_id = data.submit_analysis_job(
                 raw_id=raw_id,
@@ -306,6 +310,7 @@ def show():
                 pass
             st.success(f"已提交任务：{job_id}")
             st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
     tab_result, tab_jobs = st.tabs(["研判结果", "后台任务"])
@@ -330,7 +335,7 @@ def show():
         else:
             _render_pending_result(active_raw_id, selected if active_raw_id == raw_id else active_raw)
     with tab_jobs:
-        job_rows = _jobs_table()
+        _jobs_table()
 
     if data.has_active_jobs():
         auto_refresh(interval_ms=2500)

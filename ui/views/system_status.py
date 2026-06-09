@@ -31,7 +31,7 @@ def show():
             for r in rows
         ]),
         hide_index=True,
-        width="stretch",
+        use_container_width=True,
     )
 
     st.markdown("### 当前配置")
@@ -44,7 +44,7 @@ def show():
         {"配置项": "LLM Provider", "值": settings.llm_provider},
         {"配置项": "LLM Model", "值": settings.llm_model},
     ]
-    st.dataframe(pd.DataFrame(cfg), hide_index=True, width="stretch")
+    st.dataframe(pd.DataFrame(cfg), hide_index=True, use_container_width=True)
 
     st.markdown("### 排查提示")
     st.markdown(

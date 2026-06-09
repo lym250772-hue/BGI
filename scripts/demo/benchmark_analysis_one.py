@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """Benchmark one analysis run and print per-step latency.
 
-This script is for answering one practical question: where did a single
-intelligence analysis spend its time under the current pipeline?
-
 Examples:
     python scripts/demo/benchmark_analysis_one.py --raw-id 286 --fast
-    python scripts/demo/benchmark_analysis_one.py --raw-id 286 --standard
-    python scripts/demo/benchmark_analysis_one.py --text "接码跑分，加V test_wx" --platform manual --no-persist-warning
+    python scripts/demo/benchmark_analysis_one.py --raw-id 286 --standard --prewarm
+    python scripts/demo/benchmark_analysis_one.py --text "接码跑分，加V test_wx" --platform manual
 """
 
 from __future__ import annotations
@@ -89,20 +86,16 @@ def main() -> int:
     parser.add_argument("--raw-id", type=int, help="ods_raw_intel.id to analyze")
     parser.add_argument("--text", default="", help="Analyze this text instead of loading raw_id")
     parser.add_argument("--platform", default="manual", help="Platform used with --text")
-    parser.add_argument("--fast", action="store_true", help="Disable LLM, graph and report")
-    parser.add_argument("--standard", action="store_true", help="Enable LLM, disable graph/report")
-    parser.add_argument("--expand", action="store_true", help="Enable LLM and graph expansion")
+    parser.add_argument("--fast", action="store_true", help="Disable LLM, RoBERTa, graph and report")
+    parser.add_argument("--standard", action="store_true", help="Enable RoBERTa and LLM, disable graph/report")
+    parser.add_argument("--expand", action="store_true", help="Enable LLM, RoBERTa and graph expansion")
     parser.add_argument("--no-llm", action="store_true", help="Disable LLM fallback")
     parser.add_argument("--graph", action="store_true", help="Enable graph expansion")
     parser.add_argument("--report", action="store_true", help="Enable report generation")
-    parser.add_argument("--repeat", type=int, default=1, help="Run the same benchmark N times in one process")
-    parser.add_argument("--no-embedding", action="store_true", help="Disable embedding/Milvus slang variant scan")
-    parser.add_argument("--prewarm", action="store_true", help="Preload classifier, embedding model and Milvus before timing")
-    parser.add_argument(
-        "--no-persist-warning",
-        action="store_true",
-        help="Do not print the persistence warning",
-    )
+    parser.add_argument("--repeat", type=int, default=1, help="Run the same benchmark N times")
+    parser.add_argument("--no-embedding", action="store_true", help="Disable embedding/Milvus")
+    parser.add_argument("--prewarm", action="store_true", help="Preload classifier/embedding before timing")
+    parser.add_argument("--no-persist-warning", action="store_true", help="Do not print persistence warning")
     args = parser.parse_args()
 
     if not args.raw_id and not args.text:
@@ -121,7 +114,7 @@ def main() -> int:
     options = _options_from_mode(args)
 
     if not args.no_persist_warning:
-        print("NOTE: the current Agent persists results at the final step.")
+        print("NOTE: the Agent persists results at the final step.")
         print("      Use a disposable raw_id if you only want a benchmark run.\n")
 
     if args.prewarm:
@@ -134,11 +127,10 @@ def main() -> int:
 
     from analyzer.engine import engine
 
-    repeat = max(1, args.repeat)
     totals: list[float] = []
-    for run_no in range(1, repeat + 1):
+    for run_no in range(1, max(1, args.repeat) + 1):
         print("=" * 72)
-        print(f"run         : {run_no}/{repeat}")
+        print(f"run         : {run_no}/{max(1, args.repeat)}")
         print(f"raw_id      : {raw_id}")
         print(f"platform    : {platform}")
         print(f"text length : {len(text)}")
@@ -182,14 +174,13 @@ def main() -> int:
         print(f"TOTAL {_fmt(total)}")
 
         if durations:
-            slowest = sorted(durations, key=lambda item: item[1], reverse=True)[:5]
             print("\nSlowest steps:")
-            for step, sec in slowest:
-                pct = (sec / total * 100) if total else 0
-                print(f"  {step:<18} {_fmt(sec):>10}  {pct:5.1f}%")
+            for step, elapsed in sorted(durations, key=lambda item: item[1], reverse=True)[:5]:
+                print(f"  {step:<18} {_fmt(elapsed):>10}   {elapsed / total * 100:4.1f}%")
 
         if final_result:
             print("\nResult:")
+            print(f"  raw_status  : {final_result.get('raw_status')}")
             print(f"  risk        : {final_result.get('risk_label')} / {final_result.get('risk_sub_label')}")
             print(f"  score       : {final_result.get('risk_score')} ({final_result.get('risk_level')})")
             print(f"  entities    : {len(final_result.get('entities') or [])}")
@@ -197,10 +188,9 @@ def main() -> int:
             print(f"  tool_log    : {final_result.get('tool_log')}")
 
     if len(totals) > 1:
-        print("\nSummary:")
-        for idx, sec in enumerate(totals, start=1):
-            print(f"  run {idx}: {_fmt(sec)}")
-
+        avg = sum(totals) / len(totals)
+        print("=" * 72)
+        print(f"AVERAGE {_fmt(avg)} over {len(totals)} runs")
     return 0
 
 

@@ -22,7 +22,7 @@ def test_engine_passes_enable_llm_to_agent_run():
     fake_agent = FakeAgent()
     engine._agent = fake_agent
 
-    result = engine.run(1, "text", "telegram", enable_llm=False)
+    result = engine.run(1, "text", "weibo", enable_llm=False)
 
     assert result == {"ok": True}
     assert fake_agent.run_kwargs["enable_llm"] is False
@@ -36,7 +36,7 @@ def test_engine_passes_enable_llm_to_agent_run_stream():
     fake_agent = FakeAgent()
     engine._agent = fake_agent
 
-    steps = list(engine.run_stream(1, "text", "telegram", enable_llm=False))
+    steps = list(engine.run_stream(1, "text", "weibo", enable_llm=False))
 
     assert steps[-1]["final"] is True
     assert fake_agent.stream_kwargs["enable_llm"] is False

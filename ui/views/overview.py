@@ -63,11 +63,11 @@ def _render_chatbi_result(result: dict):
         chart_df = df[[x_col, y_col]].copy()
         chart_df[y_col] = pd.to_numeric(chart_df[y_col], errors="coerce").fillna(0)
         if chart == "line":
-            st.line_chart(chart_df.set_index(x_col), width="stretch")
+            st.line_chart(chart_df.set_index(x_col), use_container_width=True)
         else:
-            st.bar_chart(chart_df.set_index(x_col), width="stretch")
+            st.bar_chart(chart_df.set_index(x_col), use_container_width=True)
 
-    st.dataframe(df, hide_index=True, width="stretch")
+    st.dataframe(df, hide_index=True, use_container_width=True)
 
 
 def _chatbi_panel():
@@ -75,7 +75,7 @@ def _chatbi_panel():
 
     cols = st.columns(len(QUICK_QUESTIONS))
     for idx, prompt in enumerate(QUICK_QUESTIONS):
-        if cols[idx].button(prompt, key=f"chatbi_quick_{idx}", width="stretch"):
+        if cols[idx].button(prompt, key=f"chatbi_quick_{idx}", use_container_width=True):
             st.session_state.chatbi_question = prompt
             st.session_state.chatbi_result = data.chatbi_answer(prompt)
             st.rerun()
@@ -87,7 +87,7 @@ def _chatbi_panel():
     )
     ask_left, ask_right = st.columns([0.8, 4])
     with ask_left:
-        ask = st.button("查询", type="primary", width="stretch", key="chatbi_ask")
+        ask = st.button("查询", type="primary", use_container_width=True, key="chatbi_ask")
 
     if ask:
         st.session_state.chatbi_result = data.chatbi_answer(question)
@@ -120,7 +120,7 @@ def show():
         risk_rows = data.risk_distribution()
         if risk_rows:
             df = pd.DataFrame(risk_rows)
-            st.bar_chart(df.set_index("risk_label"), width="stretch")
+            st.bar_chart(df.set_index("risk_label"), use_container_width=True)
         else:
             st.info("暂无已研判风险分布。")
 
@@ -129,7 +129,7 @@ def show():
         if trend:
             df = pd.DataFrame(trend)
             df["dt"] = pd.to_datetime(df["dt"])
-            st.line_chart(df.set_index("dt")[["cnt", "high_cnt"]], width="stretch")
+            st.line_chart(df.set_index("dt")[["cnt", "high_cnt"]], use_container_width=True)
         else:
             st.info("暂无近 7 日研判完成数据。")
 
@@ -158,7 +158,7 @@ def show():
             st.dataframe(
                 pd.DataFrame(platform_rows).rename(columns={"platform": "平台", "cnt": "数量"}),
                 hide_index=True,
-                width="stretch",
+                use_container_width=True,
             )
         else:
             st.info("暂无来源平台数据。")
@@ -168,7 +168,7 @@ def show():
     st.markdown("### 近期情报")
     recent = data.list_intel(limit=12, order_by="recent_activity")
     if recent:
-        st.dataframe(_recent_table(recent), hide_index=True, width="stretch")
+        st.dataframe(_recent_table(recent), hide_index=True, use_container_width=True)
         top = recent[0]
         st.markdown(
             f"""

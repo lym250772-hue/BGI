@@ -61,12 +61,11 @@ class MySQLStore:
                 password=settings.mysql_password,
                 database=settings.mysql_database,
                 charset="utf8mb4",
-                connect_timeout=2,
-                read_timeout=5,
-                write_timeout=5,
+                connect_timeout=15,
+                read_timeout=120,
+                write_timeout=60,
                 autocommit=False,
-                cursorclass=pymysql.cursors.DictCursor,
-            )
+                cursorclass=pymysql.cursors.DictCursor)
             self._local.conn = conn
         return conn
 
@@ -84,6 +83,16 @@ class MySQLStore:
             raise
         finally:
             c.close()
+
+    def reconnect(self):
+        """强制断开并重新连接 MySQL（大量写入后使用）。"""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        self._local.conn = None
 
     # ------------------------------------------------------------------
     # Init — all 9 tables per PROJECT_PLAN.md 5.1
@@ -334,8 +343,7 @@ class MySQLStore:
             ("dwd_intel_analysis", "similar_intel_ids", "ALTER TABLE dwd_intel_analysis ADD COLUMN similar_intel_ids JSON COMMENT '历史相似情报ID与相似度JSON'"),
             ("dim_slang_dict", "candidate_raw_id", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_raw_id BIGINT COMMENT '首次发现该候选黑话的原始情报ID'"),
             ("dim_slang_dict", "candidate_evidence", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_evidence TEXT COMMENT '触发候选判断的原文证据片段'"),
-            ("dim_slang_dict", "candidate_reason", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_reason TEXT COMMENT '模型判断为疑似黑话的原因'"),
-        ]
+            ("dim_slang_dict", "candidate_reason", "ALTER TABLE dim_slang_dict ADD COLUMN candidate_reason TEXT COMMENT '模型判断为疑似黑话的原因'")]
         with self.cursor() as c:
             for table, column, sql in migrations:
                 c.execute(
@@ -344,8 +352,7 @@ class MySQLStore:
                        WHERE TABLE_SCHEMA=DATABASE()
                          AND TABLE_NAME=%s
                          AND COLUMN_NAME=%s""",
-                    (table, column),
-                )
+                    (table, column))
                 if not c.fetchone()["cnt"]:
                     c.execute(sql)
             try:
@@ -371,8 +378,7 @@ class MySQLStore:
                 "ALTER TABLE dim_slang_dict MODIFY COLUMN created_by VARCHAR(64) COMMENT '创建人或系统来源'",
                 "ALTER TABLE dim_slang_dict MODIFY COLUMN reviewed_by VARCHAR(64) COMMENT '审核人'",
                 "ALTER TABLE dim_slang_dict MODIFY COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'",
-                "ALTER TABLE dim_slang_dict MODIFY COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'",
-            ]
+                "ALTER TABLE dim_slang_dict MODIFY COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'"]
             for sql in comment_migrations:
                 try:
                     c.execute(sql)
@@ -392,11 +398,10 @@ class MySQLStore:
             ("ads_risk_case", "风险案件聚合表：保存团伙或案件级研判结果"),
             ("agent_report", "Agent研判摘要表：保存摘要、证据、建议和图谱结果"),
             ("annotation_log", "人工反馈日志表：保存人工修正和回流状态"),
-            ("analysis_job", "异步研判任务表：保存后台任务进度和结果索引"),
-        ]
+            ("analysis_job", "异步研判任务表：保存后台任务进度和结果索引")]
         column_comments = [
             "ALTER TABLE ods_raw_intel MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT COMMENT '原始情报ID'",
-            "ALTER TABLE ods_raw_intel MODIFY COLUMN source_platform VARCHAR(32) NOT NULL COMMENT '来源平台，如telegram、tieba、weibo'",
+            "ALTER TABLE ods_raw_intel MODIFY COLUMN source_platform VARCHAR(32) NOT NULL COMMENT '来源平台，如weibo、tieba、zhihu'",
             "ALTER TABLE ods_raw_intel MODIFY COLUMN source_channel VARCHAR(128) COMMENT '来源频道、群组、贴吧或社区名称'",
             "ALTER TABLE ods_raw_intel MODIFY COLUMN source_url VARCHAR(1024) COMMENT '原始情报链接'",
             "ALTER TABLE ods_raw_intel MODIFY COLUMN source_keyword VARCHAR(128) COMMENT '采集命中的关键词'",
@@ -463,8 +468,7 @@ class MySQLStore:
             "ALTER TABLE analysis_job MODIFY COLUMN current_step VARCHAR(64) COMMENT '当前执行步骤'",
             "ALTER TABLE analysis_job MODIFY COLUMN result_analysis_id BIGINT COMMENT '成功后关联的研判结果ID'",
             "ALTER TABLE analysis_job MODIFY COLUMN error_message TEXT COMMENT '失败原因'",
-            "ALTER TABLE analysis_job MODIFY COLUMN options JSON COMMENT '任务执行选项JSON'",
-        ]
+            "ALTER TABLE analysis_job MODIFY COLUMN options JSON COMMENT '任务执行选项JSON'"]
         column_comments.append(
             "ALTER TABLE ods_raw_intel MODIFY COLUMN raw_status VARCHAR(32) "
             "DEFAULT 'RAW_COLLECTED' COMMENT "
@@ -474,7 +478,7 @@ class MySQLStore:
         with self.cursor() as c:
             for table, comment in table_comments:
                 try:
-                    c.execute(f"ALTER TABLE {table} COMMENT=%s", (comment,))
+                    c.execute(f"ALTER TABLE {table} COMMENT=%s", (comment))
                 except Exception as exc:
                     logger.debug(f"Table comment migration skipped [{table}]: {exc}")
             for sql in column_comments:
@@ -578,8 +582,7 @@ class MySQLStore:
                            '$.failed_at', %s
                        )
                    WHERE id=%s""",
-                (error_text, failed_at, raw_id),
-            )
+                (error_text, failed_at, raw_id))
 
     def list_raw(self, status: str = None, priority: str = None,
                  platform: str = None, limit: int = 100, offset: int = 0) -> list[dict]:
@@ -596,8 +599,7 @@ class MySQLStore:
         with self.cursor() as c:
             c.execute(
                 f"SELECT * FROM ods_raw_intel {clause} ORDER BY collect_time DESC LIMIT %s OFFSET %s",
-                params,
-            )
+                params)
             rows = c.fetchall()
             # Map field names for backward compat
             for r in rows:
@@ -618,7 +620,7 @@ class MySQLStore:
     def get_raw_by_id(self, raw_id: int) -> dict | None:
         """Return one raw intelligence row by primary key."""
         with self.cursor() as c:
-            c.execute("SELECT * FROM ods_raw_intel WHERE id=%s", (raw_id,))
+            c.execute("SELECT * FROM ods_raw_intel WHERE id=%s", (raw_id))
             row = c.fetchone()
             return self._normalize_raw_row(row) if row else None
 
@@ -630,14 +632,13 @@ class MySQLStore:
         with self.cursor() as c:
             c.execute(
                 "SELECT merged_text, clean_text FROM dwd_clean_intel WHERE raw_id=%s",
-                (raw_id,),
-            )
+                (raw_id))
             clean = c.fetchone()
             if clean:
                 text = clean.get("merged_text") or clean.get("clean_text")
                 if text:
                     return text
-            c.execute("SELECT content_raw FROM ods_raw_intel WHERE id=%s", (raw_id,))
+            c.execute("SELECT content_raw FROM ods_raw_intel WHERE id=%s", (raw_id))
             raw = c.fetchone()
             if raw and raw.get("content_raw"):
                 return raw["content_raw"]
@@ -650,8 +651,7 @@ class MySQLStore:
                 "FROM dwd_clean_intel ci "
                 "LEFT JOIN ods_raw_intel r ON ci.raw_id = r.id "
                 "WHERE ci.simhash=%s LIMIT %s",
-                (simhash, limit),
-            )
+                (simhash, limit))
             return c.fetchall()
 
     # ==================================================================
@@ -662,7 +662,7 @@ class MySQLStore:
                            simhash: str = None, **kwargs):
         """Upsert into dwd_clean_intel."""
         with self.cursor() as c:
-            c.execute("SELECT id FROM dwd_clean_intel WHERE raw_id=%s", (raw_id,))
+            c.execute("SELECT id FROM dwd_clean_intel WHERE raw_id=%s", (raw_id))
             existing = c.fetchone()
             if existing:
                 sets = []
@@ -679,8 +679,7 @@ class MySQLStore:
                 c.execute(
                     """INSERT INTO dwd_clean_intel (raw_id, clean_text, simhash, clean_status)
                     VALUES (%s, %s, %s, 'CLEANED')""",
-                    (raw_id, clean_text, simhash),
-                )
+                    (raw_id, clean_text, simhash))
                 return c.lastrowid
 
     # ==================================================================
@@ -721,8 +720,7 @@ class MySQLStore:
             # Find latest version for this raw_id
             c.execute(
                 "SELECT MAX(version) as max_ver FROM dwd_intel_analysis WHERE raw_id=%s",
-                (raw_id,),
-            )
+                (raw_id))
             row = c.fetchone()
             max_ver = row["max_ver"] if row and row["max_ver"] else 0
             next_ver = max_ver + 1
@@ -731,8 +729,7 @@ class MySQLStore:
             if max_ver > 0:
                 c.execute(
                     "UPDATE dwd_intel_analysis SET is_latest=0 WHERE raw_id=%s",
-                    (raw_id,),
-                )
+                    (raw_id))
 
             # Insert new version
             sql = """INSERT INTO dwd_intel_analysis
@@ -764,8 +761,7 @@ class MySQLStore:
         with self.cursor() as c:
             c.execute(
                 "SELECT * FROM dwd_intel_analysis WHERE raw_id=%s ORDER BY version DESC",
-                (raw_id,),
-            )
+                (raw_id))
             return c.fetchall()
 
     @staticmethod
@@ -871,19 +867,18 @@ class MySQLStore:
     def delete_entities_for_raw(self, raw_id: int):
         """Remove previous extracted entities for a raw item before re-analysis."""
         with self.cursor() as c:
-            c.execute("DELETE FROM dwd_entity WHERE raw_id=%s", (raw_id,))
+            c.execute("DELETE FROM dwd_entity WHERE raw_id=%s", (raw_id))
 
     def find_entity(self, entity_type: str, value: str) -> list[dict]:
         with self.cursor() as c:
             c.execute(
                 "SELECT * FROM dwd_entity WHERE entity_type=%s AND entity_value=%s",
-                (entity_type, value),
-            )
+                (entity_type, value))
             return c.fetchall()
 
     def find_entities_by_raw(self, raw_id: int) -> list[dict]:
         with self.cursor() as c:
-            c.execute("SELECT * FROM dwd_entity WHERE raw_id=%s", (raw_id,))
+            c.execute("SELECT * FROM dwd_entity WHERE raw_id=%s", (raw_id))
             return c.fetchall()
 
     # ==================================================================
@@ -902,16 +897,14 @@ class MySQLStore:
                 src_entity_id, dst_entity_id, relation_type,
                 kwargs.get("relation_source", "neo4j_sync"),
                 kwargs.get("evidence_raw_id"),
-                kwargs.get("confidence", 1.0),
-            ))
+                kwargs.get("confidence", 1.0)))
 
     def get_entity_relations(self, entity_id: int) -> list[dict]:
         with self.cursor() as c:
             c.execute(
                 """SELECT * FROM dwd_entity_relation
                    WHERE src_entity_id=%s OR dst_entity_id=%s""",
-                (entity_id, entity_id),
-            )
+                (entity_id, entity_id))
             return c.fetchall()
 
     # ==================================================================
@@ -964,8 +957,7 @@ class MySQLStore:
             else:
                 c.execute(
                     "SELECT * FROM dim_slang_dict WHERE status=%s ORDER BY updated_at DESC",
-                    (status,),
-                )
+                    (status))
             rows = c.fetchall()
             for r in rows:
                 r.setdefault("slang", r.get("term"))
@@ -981,8 +973,7 @@ class MySQLStore:
         with self.cursor() as c:
             c.execute(
                 "SELECT status FROM dim_slang_dict WHERE term=%s LIMIT 1",
-                (term,),
-            )
+                (term))
             existing = c.fetchone()
         if existing and existing.get("status") == "active":
             return None
@@ -1012,15 +1003,13 @@ class MySQLStore:
                     """SELECT * FROM dim_slang_dict
                        WHERE status='candidate'
                        ORDER BY updated_at DESC LIMIT %s""",
-                    (limit,),
-                )
+                    (limit))
             else:
                 c.execute(
                     """SELECT * FROM dim_slang_dict
                        WHERE status='candidate' AND candidate_raw_id=%s
                        ORDER BY updated_at DESC LIMIT %s""",
-                    (raw_id, limit),
-                )
+                    (raw_id, limit))
             rows = c.fetchall()
         for row in rows:
             row.setdefault("term", row.get("slang"))
@@ -1041,8 +1030,7 @@ class MySQLStore:
                        reviewed_by=%s,
                        updated_at=NOW()
                    WHERE term=%s""",
-                (meaning or "", category or "", reviewer, term),
-            )
+                (meaning or "", category or "", reviewer, term))
             return c.rowcount > 0
 
     def reject_slang_candidate(self, term: str, reviewer: str = "analyst",
@@ -1056,8 +1044,7 @@ class MySQLStore:
                        candidate_reason=COALESCE(NULLIF(%s, ''), candidate_reason),
                        updated_at=NOW()
                    WHERE term=%s AND status='candidate'""",
-                (reviewer, reason or "", term),
-            )
+                (reviewer, reason or "", term))
             return c.rowcount > 0
 
     # ==================================================================
@@ -1067,7 +1054,7 @@ class MySQLStore:
     def upsert_risk_case(self, case_id: str, **kwargs):
         """Insert or update an ads_risk_case."""
         with self.cursor() as c:
-            c.execute("SELECT case_id FROM ads_risk_case WHERE case_id=%s", (case_id,))
+            c.execute("SELECT case_id FROM ads_risk_case WHERE case_id=%s", (case_id))
             if c.fetchone():
                 sets = []
                 params = []
@@ -1083,12 +1070,11 @@ class MySQLStore:
                 values = [case_id] + list(kwargs.values())
                 c.execute(
                     f"INSERT INTO ads_risk_case ({', '.join(fields)}) VALUES ({', '.join(placeholders)})",
-                    values,
-                )
+                    values)
 
     def list_risk_cases(self, status: str = "open") -> list[dict]:
         with self.cursor() as c:
-            c.execute("SELECT * FROM ads_risk_case WHERE status=%s ORDER BY created_at DESC", (status,))
+            c.execute("SELECT * FROM ads_risk_case WHERE status=%s ORDER BY created_at DESC", (status))
             return c.fetchall()
 
     # ==================================================================
@@ -1123,7 +1109,7 @@ class MySQLStore:
 
     def get_reports_by_raw(self, raw_id: int) -> list[dict]:
         with self.cursor() as c:
-            c.execute("SELECT * FROM agent_report WHERE raw_id=%s ORDER BY created_at DESC", (raw_id,))
+            c.execute("SELECT * FROM agent_report WHERE raw_id=%s ORDER BY created_at DESC", (raw_id))
             return c.fetchall()
 
     # ==================================================================
@@ -1155,23 +1141,20 @@ class MySQLStore:
                 result["synced"] = self.sync_slang_correction(
                     slang=field_name,  # field_name carries the slang term
                     normalized_meaning=new_value,
-                    corrected_by=annotator,
-                )
+                    corrected_by=annotator)
             elif target_type == "classification":
                 result["synced"] = self.sync_classification_correction(
                     raw_data_id=target_id,
                     intent_label=field_name,  # field_name carries the intent_label
                     sub_label=new_value or "",
-                    corrected_by=annotator,
-                )
+                    corrected_by=annotator)
                 self._generate_training_sample(target_id, field_name, new_value)
             elif target_type == "entity":
                 result["synced"] = self.sync_entity_correction(
                     entity_id=target_id,
                     field_name=field_name,
                     new_value=new_value,
-                    corrected_by=annotator,
-                )
+                    corrected_by=annotator)
         except Exception as exc:
             logger.warning(f"HITL auto-sync failed for {target_type}: {exc}")
             result["sync_error"] = str(exc)
@@ -1203,8 +1186,7 @@ class MySQLStore:
                 """UPDATE annotation_log SET synced=1
                    WHERE target_type='slang' AND synced=0
                    AND field_name=%s""",
-                (slang,),
-            )
+                (slang))
         logger.info(f"HITL slang correction synced: '{slang}' -> '{normalized_meaning}'")
         return True
 
@@ -1216,13 +1198,11 @@ class MySQLStore:
                 """UPDATE dwd_intel_analysis
                    SET risk_label=%s, risk_sub_label=%s, classification_method='manual'
                    WHERE raw_id=%s AND is_latest=1""",
-                (intent_label, sub_label, raw_data_id),
-            )
+                (intent_label, sub_label, raw_data_id))
             c.execute(
                 """UPDATE annotation_log SET synced=1
                    WHERE target_type='classification' AND target_id=%s AND synced=0""",
-                (raw_data_id,),
-            )
+                (raw_data_id))
         logger.info(f"HITL classification correction synced for raw_id={raw_data_id}")
         return True
 
@@ -1233,26 +1213,22 @@ class MySQLStore:
             if field_name == "entity_type":
                 c.execute(
                     "UPDATE dwd_entity SET entity_type=%s WHERE id=%s",
-                    (new_value, entity_id),
-                )
+                    (new_value, entity_id))
             elif field_name == "entity_value":
                 c.execute(
                     "UPDATE dwd_entity SET entity_value=%s, normalized_value=%s WHERE id=%s",
-                    (new_value, new_value, entity_id),
-                )
+                    (new_value, new_value, entity_id))
             elif field_name == "confidence":
                 c.execute(
                     "UPDATE dwd_entity SET confidence=%s WHERE id=%s",
-                    (float(new_value), entity_id),
-                )
+                    (float(new_value), entity_id))
             else:
                 logger.warning(f"Unknown entity field: {field_name}")
                 return False
             c.execute(
                 """UPDATE annotation_log SET synced=1
                    WHERE target_type='entity' AND target_id=%s AND field_name=%s AND synced=0""",
-                (entity_id, field_name),
-            )
+                (entity_id, field_name))
         logger.info(f"HITL entity correction synced: entity_id={entity_id} {field_name}={new_value}")
         return True
 
@@ -1266,8 +1242,7 @@ class MySQLStore:
             with self.cursor() as c:
                 c.execute(
                     "SELECT clean_text, merged_text FROM dwd_clean_intel WHERE raw_id=%s",
-                    (raw_id,),
-                )
+                    (raw_id))
                 clean = c.fetchone()
                 text = (clean.get("merged_text") or clean.get("clean_text") or "") if clean else ""
 
@@ -1318,8 +1293,7 @@ class MySQLStore:
                     (job_id, raw_id, input_text, platform, status, progress, options)
                 VALUES (%s, %s, %s, %s, 'pending', 0, %s)""",
                 (job_id, raw_id, input_text, platform,
-                 _json.dumps(options) if options else None),
-            )
+                 _json.dumps(options) if options else None))
         logger.debug(f"Job created: {job_id} for raw_id={raw_id}")
         return job_id
 
@@ -1345,7 +1319,7 @@ class MySQLStore:
     def get_job(self, job_id: str) -> dict | None:
         """Get a single job by ID."""
         with self.cursor() as c:
-            c.execute("SELECT * FROM analysis_job WHERE job_id=%s", (job_id,))
+            c.execute("SELECT * FROM analysis_job WHERE job_id=%s", (job_id))
             return c.fetchone()
 
     def get_analysis_bundle(self, raw_id: int) -> dict:
@@ -1355,18 +1329,15 @@ class MySQLStore:
                 """SELECT * FROM dwd_intel_analysis
                    WHERE raw_id=%s AND is_latest=1
                    ORDER BY created_at DESC LIMIT 1""",
-                (raw_id,),
-            )
+                (raw_id))
             analysis = c.fetchone() or {}
             c.execute(
                 "SELECT * FROM dwd_entity WHERE raw_id=%s ORDER BY id DESC",
-                (raw_id,),
-            )
+                (raw_id))
             entities = c.fetchall()
             c.execute(
                 "SELECT * FROM agent_report WHERE raw_id=%s ORDER BY created_at DESC LIMIT 1",
-                (raw_id,),
-            )
+                (raw_id))
             report = c.fetchone() or {}
 
         def _json_load(value, default):
@@ -1423,13 +1394,11 @@ class MySQLStore:
             if status:
                 c.execute(
                     "SELECT * FROM analysis_job WHERE status=%s ORDER BY created_at DESC LIMIT %s",
-                    (status, limit),
-                )
+                    (status, limit))
             else:
                 c.execute(
                     "SELECT * FROM analysis_job ORDER BY created_at DESC LIMIT %s",
-                    (limit,),
-                )
+                    (limit))
             return c.fetchall()
 
     def list_unfinished_jobs(self, limit: int = 50) -> list[dict]:

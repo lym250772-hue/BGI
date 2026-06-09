@@ -2,11 +2,15 @@
 import json, os, time, sys
 sys.stdout.reconfigure(encoding='utf-8')
 
+import pytest
 from playwright.sync_api import sync_playwright
 from config.settings import settings
 from urllib.parse import quote
 
 cookie_file = os.path.join(settings.raw_data_dir.as_posix(), 'douyin_cookies.json')
+if not os.path.exists(cookie_file):
+    pytest.skip("douyin_cookies.json is required for live Douyin search test", allow_module_level=True)
+
 with open(cookie_file) as f:
     cookies = json.load(f)
 
