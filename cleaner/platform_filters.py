@@ -162,8 +162,18 @@ def _check_ad_noise(text: str) -> FilterResult:
     # 先检查误匹配上下文（避免假阳性）
     for keyword, fp_pattern, explanation in FALSE_POSITIVE_CONTEXTS:
         if keyword in text and re.search(fp_pattern, text):
-            # 这是误匹配，不作为噪声处理
             return text, False, ""
+
+    # 如果文本包含灰产情报关键词，跳过广告噪声判定
+    # 避免 "复制到浏览器 + 接码" 这种情况被误杀
+    INTEL_SIGNAL_KW = [
+        "接码", "刷单", "出号", "卡商", "跑分", "洗钱", "USDT",
+        "微信号", "QQ号", "手机号", "银行卡", "实名", "身份证",
+        "涨粉", "解封", "代收", "代付", "撞库", "盗号", "免杀",
+        "引流", "买粉", "刷量", "群控", "云手机", "料商", "号商",
+    ]
+    if any(kw in text for kw in INTEL_SIGNAL_KW):
+        return text, False, ""
 
     for kw in HARD_NOISE_KEYWORDS:
         if kw in text:

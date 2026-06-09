@@ -88,13 +88,34 @@ def _run_cleaning_on_selected(selected_ids: list[int]) -> dict:
 
         existing_hashes.append(result["simhash"])
 
+        # 构建丢弃原因
+        discard_reason = ""
+        if status == "DISCARDED":
+            reason = result.get("noise_reason", "")
+            is_dup = result.get("is_duplicate", False)
+            is_sim = result.get("is_similar", False)
+            is_media = result.get("is_media_only", False)
+            if is_dup:
+                discard_reason = reason if reason else "作者重复(同一人重复发相同内容)"
+            elif is_media:
+                discard_reason = reason if reason else "QQ嵌入媒体(无法获取图片/视频内容)"
+            elif reason:
+                discard_reason = reason
+            else:
+                # 真正找不到原因时才用默认描述
+                score = result.get('noise_score', 0)
+                if score >= 0.6:
+                    discard_reason = f"噪声评分过高({score:.2f})"
+                else:
+                    discard_reason = f"平台规则判定为噪声(评分{score:.2f})"
+
         details.append({
             "id": item["id"],
             "platform": item["platform"],
             "original": item["content_raw"][:200],
             "text": result["text"][:200],
             "status": status,
-            "noise_reason": result.get("noise_reason", ""),
+            "noise_reason": discard_reason,
             "noise_score": result.get("noise_score", 0),
             "content_role": result.get("content_role", "unknown"),
             "is_media_only": result.get("is_media_only", False),
@@ -273,28 +294,60 @@ def show():
             with c2:
                 st.metric("✅ 通过", result["cleaned"])
             with c3:
-                st.metric("🔗 跨作者相似", result["similar"], help="不同作者相似内容=情报线索，保留")
+                st.metric("🔗 相似", result["similar"])
             with c4:
-                st.metric("📷 媒体占位", result["media_only"], help="纯图片/视频，保留待媒体分析")
+                st.metric("📷 媒体", result["media_only"])
             with c5:
                 st.metric("🗑️ 丢弃", result["discarded"])
 
             # 详情表
             if result.get("details"):
-                with st.expander(f"清洗详情 ({len(result['details'])} 条)", expanded=False):
-                    detail_df = pd.DataFrame([
-                        {
+                all_details = result["details"]
+                # 用 session_state 记住展开状态
+                if "cleaning_detail_expanded" not in st.session_state:
+                    st.session_state.cleaning_detail_expanded = False
+
+                col_a, col_b = st.columns([1, 3])
+                with col_a:
+                    filter_status = st.selectbox(
+                        "筛选", ["全部", "✅ 通过", "🔗 相似", "📷 媒体", "🗑️ 丢弃"],
+                        key="cleaning_detail_filter",
+                    )
+                with col_b:
+                    detail_expanded = st.checkbox(
+                        "展开详情", value=st.session_state.cleaning_detail_expanded,
+                        key="cleaning_detail_expand_cb",
+                    )
+                    st.session_state.cleaning_detail_expanded = detail_expanded
+
+                details = list(all_details)
+                if filter_status == "✅ 通过":
+                    details = [d for d in details if d["status"] == "CLEANED"]
+                elif filter_status == "🔗 相似":
+                    details = [d for d in details if d["status"] == "SIMILAR"]
+                elif filter_status == "📷 媒体":
+                    details = [d for d in details if d["status"] == "MEDIA_ONLY"]
+                elif filter_status == "🗑️ 丢弃":
+                    details = [d for d in details if d["status"] == "DISCARDED"]
+
+                if st.session_state.cleaning_detail_expanded:
+                    # 根据筛选决定列
+                    is_discarded_view = (filter_status == "🗑️ 丢弃")
+                    rows = []
+                    for d in details:
+                        row = {
                             "ID": d["id"],
                             "平台": d["platform"],
-                            "处理状态": d["status"],
+                            "状态": d["status"],
                             "内容角色": d.get("content_role", ""),
                             "噪声分": f"{d['noise_score']:.2f}",
-                            "丢弃原因": d.get("noise_reason", "")[:80],
-                            "清洗后文本": (d.get("text") or "")[:120],
                         }
-                        for d in result["details"]
-                    ])
-                    st.dataframe(detail_df, hide_index=True, use_container_width=True, height=300)
+                        if is_discarded_view:
+                            row["丢弃原因"] = d.get("noise_reason", "")[:100]
+                        row["清洗后文本"] = (d.get("text") or "")[:120]
+                        rows.append(row)
+                    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True, height=300)
+                    st.caption(f"共 {len(details)} 条")
 
             # 清除按钮
             if st.button("清除结果", key="clear_cleaning_result"):

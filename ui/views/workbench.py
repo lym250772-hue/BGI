@@ -24,7 +24,7 @@ STATUS_OPTIONS = {
 
 MODE_OPTIONS = {
     "快速筛查": {
-        "desc": "规则和已有词典优先，关闭 LLM、向量检索与图谱扩线；结果标记为已初筛，可继续升级为标准研判。",
+        "desc": "规则和已有词典优先，关闭 LLM、向量检索与图谱扩线，可继续升级为标准研判。",
         "options": {
             "enable_llm": False,
             "enable_roberta": False,

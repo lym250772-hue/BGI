@@ -53,14 +53,21 @@ class NoiseScorer:
     """多维度噪声评分，综合判断内容质量。"""
 
     # ── 加分项（内容质量高）──
+    # 覆盖全部 48 个黑话关键词 + 常见灰产信号词
     BONUS_KEYWORDS = [
-        "实名", "身份证", "银行卡", "手机号", "支付宝", "微信",
-        "QQ号", "账号", "密码", "验证码", "接码", "刷单",
-        "涨粉", "解封", "代收", "代付", "跑分", "洗钱",
-        "USDT", "BTC", "ETH", "虚拟币", "交易所", "搬砖",
-        "引流", "吸粉", "买粉", "买量", "刷量", "刷赞",
-        "劫持", "木马", "病毒", "后门", "免杀", "壳",
-        "肉鸡", "僵尸", "DDOS", "CC攻击", "撞库", "脱库",
+        "714高炮", "AB贷", "上车", "下车", "云手机", "人脸", "代下", "代理IP",
+        "众包", "八件套", "养号", "出号", "刷单", "千粉", "卡商", "反卤",
+        "发卡", "可开播", "号商", "四件套", "大肉", "引流", "打码", "报单",
+        "挂机", "接码", "搬砖", "撞库", "数字人", "料商", "无人直播", "无损套",
+        "日结", "模拟器", "水房", "洗号", "狗推", "猫池", "白户", "破盾",
+        "羊头", "羊腿", "群控", "薅羊毛", "融车", "跑分", "车手", "黄牛",
+        # 额外信号词
+        "U商", "USDT", "BTC", "ETH", "买号", "卖号", "假流量", "流量卡",
+        "国际短信", "背锅侠", "实名", "身份证", "银行卡", "手机号", "支付宝",
+        "微信", "QQ号", "密码", "验证码", "涨粉", "解封", "代收", "代付",
+        "洗钱", "虚拟币", "交易所", "吸粉", "买粉", "刷量", "刷赞",
+        "劫持", "木马", "病毒", "后门", "免杀", "壳", "肉鸡", "僵尸",
+        "DDOS", "CC攻击", "脱库",
     ]
 
     # ── 减分项（噪声特征）──
@@ -130,14 +137,12 @@ class NoiseScorer:
                 score += penalty
                 reasons.append(reason)
 
-        # ── 加分：含灰黑产关键词 ──
+        # ── 加分：含灰黑产关键词（仅降分，不写入 noise_reason）──
         bonus_count = sum(1 for kw in cls.BONUS_KEYWORDS if kw in text)
         if bonus_count >= 3:
             score -= 0.15
-            reasons.append(f"含{bonus_count}个情报关键词")
         elif bonus_count >= 1:
             score -= 0.05
-            reasons.append(f"含{bonus_count}个情报关键词")
 
         # ── 纯数字/符号 ──
         nonsymbol = re.findall(r"[一-鿿a-zA-Z0-9]", text)
@@ -371,7 +376,9 @@ class CleaningPipeline:
         # 疑似灰产从业者（发广告/服务/交易信息）
         actor_kw = ["出号", "接码", "出抖", "卖号", "收号", "刷单", "日结",
                     "需要的来", "懂的来", "私我", "加我", "联系我",
-                    "一手", "批发", "低价", "量大", "出量", "价格"]
+                    "一手", "批发", "低价", "量大", "出量", "价格",
+                    "料商", "号商", "卡商", "寻长期", "靠谱", "有嘛", "有吗",
+                    "千粉", "可开播", "涨粉", "解封", "代下", "代收", "代付"]
         if any(kw in text for kw in actor_kw):
             return "actor"
 
@@ -444,8 +451,24 @@ class CleaningPipeline:
             "[file]", "[audio]", "[表情]", "[sticker]", "[贴纸]",
             "(纯媒体消息)", "【无文本内容】", "【仅图片】", "【仅视频】",
         ]
+        # QQ 图片/表情变体: [image:xxx], [image:[动画表情]], [CQ:image,...]
+        MEDIA_PREFIXES = ["[image:", "[CQ:image", "[CQ:face", "[CQ:video",
+                         "[CQ:record", "[CQ:file", "[CQ:audio"]
+
         is_media_only = any(text.strip() == mp for mp in MEDIA_PLACEHOLDERS)
-        if not is_media_only:
+        # QQ 嵌入媒体 → 无法通过 NapCatQQ 获取实际内容，标记为噪声丢弃
+        is_qq_media_noise = False
+        stripped_strip = text.strip()
+        if platform == "qq_group":
+            # QQ 平台的纯媒体占位/嵌入媒体一律丢弃
+            if is_media_only or any(stripped_strip.startswith(p) for p in MEDIA_PREFIXES):
+                is_qq_media_noise = True
+                is_media_only = False  # 不要 MEDIA_ONLY，直接走噪声丢弃
+        else:
+            # 非 QQ 平台：检查 [image:xxx] / [CQ:xxx] 前缀
+            if not is_media_only and any(stripped_strip.startswith(p) for p in MEDIA_PREFIXES):
+                is_qq_media_noise = True
+        if not is_media_only and not is_qq_media_noise:
             # 检查是否只有媒体占位 + 极少文字（如 "[image] 看看"）
             stripped = text.strip()
             for mp in MEDIA_PLACEHOLDERS:
@@ -488,8 +511,11 @@ class CleaningPipeline:
         content_role = self.detect_content_role(text_cleaned, author_username, platform)
 
         # ── 综合判断 ──
-        if is_media_only:
-            # 纯媒体消息：不丢弃（可能包含有价值的图片/视频）
+        if is_qq_media_noise:
+            # QQ 嵌入媒体 [image:xxx]/[CQ:xxx]：无法获取实际内容，直接丢弃
+            is_noise = True
+        elif is_media_only:
+            # 纯媒体占位（[image]/[视频] 等）：不丢弃（可能包含有价值的图片/视频）
             is_noise = False
         else:
             is_noise = (
@@ -507,7 +533,9 @@ class CleaningPipeline:
             noise_reason_parts.append("文本过短(<3字符)")
 
         # 媒体占位：特殊标注
-        if is_media_only and not noise_reason_parts:
+        if is_qq_media_noise:
+            noise_reason_parts.append("QQ嵌入媒体(无法获取图片/视频内容)")
+        elif is_media_only and not noise_reason_parts:
             noise_reason_parts.append("纯媒体占位消息")
 
         return {
@@ -644,12 +672,10 @@ class CleaningPipeline:
     def process(self, raw_text: str, existing_hashes: list[str] = None,
                 platform: str = "unknown", author_uid: str = "",
                 author_username: str = "") -> dict:
-        """兼容旧版 CleaningPipeline.process() 接口。
+        """清洗单条数据，返回完整结果。
 
-        供 main.py clean 命令使用。
+        供 main.py clean 命令和 UI 清洗页面使用。
         """
-        existing_hashes = existing_hashes or []
-
         # 先用新管道清洗
         result = self.clean_single(platform, raw_text,
                                    author_uid=author_uid,
@@ -657,13 +683,6 @@ class CleaningPipeline:
 
         # 作者感知去重检查
         dedup = self._check_duplicate(result["simhash"], author_uid, result["text"])
-
-        # 检查旧版 hash 去重（兼容）
-        dup_legacy = False
-        for h in existing_hashes:
-            if self.hamming_distance(result["simhash"], h) <= self.simhash_threshold:
-                dup_legacy = True
-                break
 
         # 媒体占位特殊处理
         if result["is_media_only"]:
@@ -714,7 +733,7 @@ class CleaningPipeline:
                 "is_noise": result["is_noise"],
                 "noise_reason": result["noise_reason"],
                 "priority": result["priority"],
-                "should_discard": result["should_discard"] or dup_legacy,
+                "should_discard": result["should_discard"],
                 "status": "SIMILAR" if not result["should_discard"] and not dup_legacy else "DISCARDED",
             }
 
@@ -731,7 +750,7 @@ class CleaningPipeline:
             "is_noise": result["is_noise"],
             "noise_reason": result["noise_reason"],
             "priority": result["priority"],
-            "should_discard": result["should_discard"] or dup_legacy,
+            "should_discard": result["should_discard"],
             "status": "CLEANED" if not result["should_discard"] and not dup_legacy else "DISCARDED",
         }
 
