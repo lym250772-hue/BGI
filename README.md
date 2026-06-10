@@ -1,492 +1,352 @@
-# BGI — 黑灰产情报分析 Agent
+# 黑灰产情报分析 Agent
 
-BGI 是一套面向黑灰产情报场景的**全链路自动化分析系统**，覆盖数据采集、智能清洗、风险研判、实体抽取、知识图谱和可视化展示的完整闭环。项目参加字节跳动 AI 全栈挑战赛（AI 安全系统赛道）。
+> 字节跳动 AI 全栈挑战赛 · AI 安全系统赛道 | 团队：你说的很队
 
-**核心定位**：把散落在多个互联网平台的黑灰产相关文本，自动转化为可查询、可扩线、可复核的结构化情报线索库。
-
----
-
-## 1. 项目概述
-
-### 1.1 解决什么问题
-
-黑灰产情报分散在微博、知乎、小红书、抖音、贴吧、闲鱼、QQ群等多个平台，格式各异、噪声混杂。安全分析人员面临三个核心痛点：
-
-| 痛点 | 传统方式 | BGI 方案 |
-|------|---------|---------|
-| **采集分散** | 逐平台手动搜索、截图留存 | 7平台统一采集器，产出标准化 IntelItem 格式 |
-| **噪声干扰** | 大量广告、重复内容需人工筛选 | 6步零LLM清洗管道，作者感知去重，平台专属噪声过滤 |
-| **分析耗时** | 逐条阅读、手工提取实体和关联 | 三级分类 + 四级实体抽取 + 图谱扩线，全自动完成 |
-| **主动情报缺失** | 只能被动等待公开信息 | AI 钓鱼人物主动接触灰产卖家，获取一手情报 |
-
-### 1.2 完整链路
-
-```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│  数据采集层   │ →  │  数据清洗层   │ →  │  智能研判层   │ →  │  展示与交互   │
-│              │    │              │    │              │    │              │
-│ 7平台采集器   │    │ 作者感知去重   │    │ 三级风险分类   │    │ 8页面仪表盘   │
-│ 统一IntelItem │    │ 平台噪声过滤   │    │ 四级实体抽取   │    │ 一键全流程    │
-│ AI钓鱼人物    │    │ 内容角色分类   │    │ 黑话归一发现   │    │ 流式对话模拟  │
-│ 北京时间戳    │    │ Emoji语义翻译 │    │ 证据+风险评分  │    │ ChatBI 问答   │
-└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
-                              │
-                      ┌───────┴───────┐
-                      │   存储与知识层  │
-                      │ MySQL Neo4j    │
-                      │ Milvus Doris   │
-                      └───────────────┘
-```
-
-### 1.3 关键数字
-
-| 指标 | 数值 |
-|------|:----:|
-| 采集平台 | 7 个 |
-| 样本数据 | 10,248 条 |
-| Python 文件 | ~120 个 |
-| Streamlit 页面 | 8 个 |
-| 黑话词典 | 48 个关键词 |
-| AI 钓鱼人物 | 3 个 Profile |
-| 数据流水线 | 采→洗→研→库 全自动 |
+**一句话**：把散落在7个互联网平台的黑灰产文本，**一键自动转化为可查询、可扩线、可复核的结构化情报线索库**。
 
 ---
 
-## 2. 系统架构
+## 为什么做这个
 
-### 2.1 技术栈
+黑灰产情报散落在微博、知乎、小红书、抖音、贴吧、闲鱼、QQ群中，安全分析人员面临：
 
-| 层次 | 技术 | 说明 |
-|------|------|------|
-| 数据采集 | HTTP API + Playwright + WebSocket | 纯HTTP(微博/知乎)、持久化浏览器(小红书/闲鱼/抖音)、WebSocket(QQ群) |
-| 文本清洗 | Python (SimHash + 正则 + Emoji映射) | 零LLM调用，6步管道 |
-| 风险分类 | L1关键词 → L2 RoBERTa → L3 LLM (DeepSeek) | 三级级联，自动降级 |
-| 实体抽取 | 正则 → 词典 → Milvus向量 → LLM | 四级级联 |
-| 存储 | MySQL + Neo4j + Milvus + Doris | ODS/DWD/DIM/ADS 分层 |
-| 服务 | FastAPI + Streamlit | RESTful API + 仪表盘 |
-| 部署 | Docker Compose | 一键启动全部基础设施 |
+- **采集难**：逐平台手动搜索、截图留存，效率极低
+- **噪声多**：大量广告、重复内容、系统消息需人工筛选
+- **分析慢**：逐条阅读、手工提取实体和关联关系
+- **被动等**：只能等待公开信息，无法主动获取一手情报
 
-### 2.2 数据流转
+我们的系统用 **4 层自动化流水线** 解决这些问题。
+
+---
+
+## 系统架构
+
+**四层流水线 + 双通道展示**：
 
 ```
-原始数据 (各平台文本)
-    │
-    ▼
-ods_raw_intel         状态: RAW_COLLECTED
-    │
-    ├─ 清洗通过 ──→  状态: CLEANED     ──→ 进入研判队列
-    ├─ 媒体占位 ──→  状态: MEDIA_ONLY   ──→ 保留待OCR/ASR
-    ├─ 相似内容 ──→  状态: SIMILAR      ──→ 保留(跨作者情报信号)
-    └─ 噪声/重复 ──→ 状态: DISCARDED    ──→ 不进入后续
-         │
-         ▼
-dwd_clean_intel       清洗结果：clean_text + simhash + 内容角色
-         │
-         ▼
-研判引擎 (state_machine)
-    ├─ classify          风险分类 (L1→L2→L3)
-    ├─ extract_entities  实体抽取 (正则→词典→向量→LLM)
-    ├─ graph_expand      图谱扩线 (Neo4j)
-    ├─ slang_normalize   黑话归一 + 候选发现
-    ├─ extract_evidence  证据片段提取
-    ├─ risk_score        风险评分
-    └─ generate_report   摘要与处置建议
-         │
-         ▼
-多库同步: MySQL(dwd_intel_analysis + dwd_entity) + Neo4j + Milvus + Doris
-         │
-         ▼
-前端展示: 情报池 / 研判工作台 / 知识库 / ChatBI / 系统状态
+   [数据采集层]          [智能清洗层]          [风险研判层]          [多库沉淀层]
+  ┌────────────┐      ┌────────────┐      ┌────────────┐      ┌────────────┐
+  │ 7平台采集器 │      │ 6步零LLM管道│      │ 状态机Agent │      │   MySQL    │
+  │ HTTP API   │ ───→ │ 作者感知去重 │ ───→ │ 三级分类    │ ───→ │   Neo4j    │
+  │ Playwright │      │ 平台噪声过滤 │      │ 四级实体    │      │   Milvus   │
+  │ WebSocket  │      │ 内容角色分类 │      │ 黑话归一    │      │   Doris    │
+  └────────────┘      └────────────┘      └────────────┘      └────────────┘
+        │                                                           │
+        │         ┌─────────────────────────┐                      │
+        └─────────│  AI 钓鱼人物（主动情报）  │─────────────────────┘
+                  │  3个人物 · 流式对话 · 安全护栏 │
+                  └─────────────────────────┘
+                                      │
+                              ┌───────┴───────┐
+                              │  前端展示层     │
+                              │ 8页面仪表盘     │
+                              │ FastAPI 接口   │
+                              └───────────────┘
 ```
 
 ---
 
-## 3. 模块详解
+## 核心亮点（评委关注）
 
-### 3.1 数据采集层 (`collectors/`)
+### ⭐ 亮点一：作者感知去重 — 重新定义情报去重
 
-**7 平台全覆盖**，统一输出 `IntelItem` 格式：
+传统去重看到相同内容就删。但我们发现：**同一内容被不同人发布，本身就是情报信号**。
 
-| 平台 | 品类 | 采集技术 | 速度 | 评论采集 |
-|------|:--:|------|:--:|:--:|
-| 微博 | 内容社区 | AJAX API (纯HTTP) | ~8条/s | ✅ |
-| 知乎 | 内容社区 | 浏览器内 fetch API | ~5条/s | ✅ |
-| 贴吧 | 论坛 | JSON API + DOM | ~10条/s | ✅ |
-| 小红书 | 内容社区 | v3持久化浏览器 + SSR提取 | ~0.5条/s | ✅ |
-| 抖音 | 短视频 | X-Bogus签名 + 浏览器内fetch | ~0.5条/s | ✅ |
-| 闲鱼 | 二手交易 | v3持久化浏览器 + DOM解析 | ~0.3条/s | — |
-| QQ群 | 社交IM | NapCatQQ WebSocket + HTTP | 实时/批量 | — |
+| 场景 | 传统SimHash | 我们的做法 |
+|------|:----------:|---------|
+| 同一新闻6家媒体转发 | 删5条 | **全部保留** — 跨作者=议题扩散信号 |
+| 同一卖家重复发广告 | 判重丢弃 | 判重丢弃 — 同作者=真正重复 |
+| QQ群 bot消息 | 进入分析浪费LLM | **作者名过滤直接丢弃** — Q群管家等系统账号 |
+| 短消息"寻卡商日跑5w" | 因字少被罚分 | **免罚** — 检测到情报关键词自动保护 |
 
-**统一 IntelItem 格式**（`collectors/base.py`）：
+**自适应阈值**：短文本(<30字)→0，中文本→1，长文本(≥80字)→3。不搞一刀切。
 
-```
-platform | content_raw | content_type | source_url | author_uid | author_username
-group_id | collected_at(北京时间) | like_count | comment_count | share_count
-comments | image_urls | tags | price | location | metadata
-```
+### ⭐ 亮点二：AI 钓鱼人物 — 主动情报收集
 
-**设计亮点**：
-- 所有平台采集时间统一使用北京时间（`now_bjt()`）
-- 反爬6件套：UA池 + webdriver隐藏 + Cookie注入 + 随机间隔 + 首页预热 + 验证码检测
-- 增量采集：按关键词记录时间戳，断点续采
-- QQ群双模式：被动监听(WebSocket) + 主动拉取历史消息(HTTP)
+不是被动等待数据，而是**让 AI 伪装成买家/刷手/店主，主动接触灰产卖家获取一手情报**。
 
-### 3.2 主动情报收集 (`persona/`)
+- 3个AI人物各有完整YAML行为设定（身份/语气/提问模式/安全护栏/情报目标）
+- 7层安全护栏双向审查（禁止支付/透露身份/鼓励违法，自动退出+安全兜底）
+- 流式实时对话展示，对话完成后LLM自动提取结构化情报（服务/定价/支付/风险指标）
+- **可自定义角色**：字段级编辑器，修改身份/语气/开场白/安全条件，即改即用
 
-**AI 钓鱼人物引擎** — 不是被动等待数据，而是主动伪装身份接触灰产卖家：
+### ⭐ 亮点三：零 LLM 6步清洗管道
 
-| 人物 | 身份 | 目标 |
-|------|------|------|
-| 🛒 电商卖家小张 | 刚开淘宝店的个体户 | 接触涨粉/刷单/解封服务卖家 |
-| 🎓 大学生小李 | 想找兼职的学生 | 接触刷单/水军招募团队 |
-| 📱 自媒体王姐 | 账号被封的自媒体人 | 接触账号解封/交易服务 |
-
-每个人物配置为 YAML 文件，包含完整的行为设定：
+清洗阶段**不消耗任何 LLM Token**，6步全部基于规则+SimHash+Emoji映射：
 
 ```
-identity (身份) → conversation_style (对话风格) → safety (安全护栏) → intelligence_goals (情报目标)
+原始文本 → Emoji语义翻译(100+映射) → 平台专属过滤(7平台各不同)
+→ 文本规范化(Unicode/全半角/零宽字符) → 作者感知去重 → 噪声评分 → 优先级标记
 ```
 
-**安全护栏（7层）**：
-- 禁止真实支付、禁止透露真实身份、禁止鼓励违法行为
-- 外出/入站消息双向审查
-- 4类退出条件（要求先付款、要求提供证件、要求加私聊、涉及违法内容）
-- 违规触发后自动使用安全兜底消息
+**内容角色五分类**（同样是零LLM）：actor(灰产从业者) / victim(受害者) / media(媒体) / police(警方) / unknown
 
-**技术实现**：
-- 流式生成器模式（`run_conversation_stream`），对话逐轮实时刷新
-- 支持角色字段级自定义覆盖（`profile_override`），不影响原始 YAML
-- 对话完成后 LLM 自动提取结构化情报（服务/定价/支付方式/联系方式/风险指标）
+### ⭐ 亮点四：数据飞轮 — 黑话词典自我演化
 
-### 3.3 数据清洗层 (`cleaner/`)
-
-**6步零LLM管道**，核心创新是**作者感知去重**：
+系统不只是识别已有黑话，还能**发现疑似新词并沉淀为词典演化入口**：
 
 ```
-原始文本
-  ├─ Step 0: Emoji语义翻译   100+映射，8大类别，追加式翻译
-  ├─ Step 1: 平台感知过滤     7平台专属规则 + 通用噪声 + 误匹配检测
-  ├─ Step 2: 文本规范化       HTML/Unicode/零宽字符/全半角/URL简化
-  ├─ Step 3: 作者感知去重 ⭐  同作者+相似=丢弃 | 不同作者+相似=情报保留
-  │          自适应阈值: <30字→0, ≥80字→3
-  ├─ Step 4: 噪声评分         12维度(0-1)，短文本含情报词免罚
-  └─ Step 5: 优先级标记       高危关键词→HIGH
+新词发现(embedding/LLM) → candidate(候选状态) → 前端"知识库"人工确认
+→ active(正式词典) → Milvus重新索引 → 下次自动识别 ✅
 ```
 
-**作者感知去重 vs 传统去重**：
+### ⭐ 亮点五：一键全自动流水线
 
-| 场景 | 传统SimHash | BGI 作者感知 |
-|------|:----------:|:----------:|
-| 同一新闻6家媒体转发 | 删5条 → 情报丢失 | **全部保留**（跨作者=情报信号） |
-| 同一卖家重复发广告 | 判重丢弃 | 判重丢弃（同作者=真正重复） |
-| QQ群 [image] 消息 | 判噪声丢弃 | **MEDIA_ONLY**（保留待OCR） |
-| 短消息含情报词 | 因"文本短"罚分 | **免罚**（检测到情报关键词） |
-
-**内容角色五分类**（零LLM）：
+打开「灰黑产情报分析Agent」页面 → 选平台+关键词 → 点一下按钮：
 
 ```
-actor(灰产从业者) | victim(受害者) | media(媒体) | police(警方) | unknown(未知)
+Step 1: 实时采集(逐条计数) → Step 2: 智能清洗(逐条进度) → Step 3: 自动研判(内容预览)
+→ Step 4: 多库同步 → 完成。全程不到 2 分钟。
 ```
 
-**平台专属过滤**：
+采多少就洗多少、研多少，**严格ID串联**，不会误处理历史积压数据。
 
-| 平台 | 特殊处理 |
+---
+
+## 关键数字
+
+| 采集平台 | 样本数据 | 清洗管道 | AI人物 | LLM调用 |
+|:--:|:--:|:--:|:--:|:--:|
+| 7 个 | 10,248 条 | 6步零LLM | 3 个 | 研判层按需调用 |
+
+---
+
+## 数据采集
+
+7平台统一 `IntelItem` 格式，时间戳全部北京时间：
+
+| 平台 | 品类 | 技术方案 | 速度 | 特点 |
+|------|:--:|------|:--:|------|
+| 微博 | 内容 | AJAX API 纯HTTP | ~8条/s | 无浏览器，高吞吐 |
+| 知乎 | 内容 | 浏览器内fetch API | ~5条/s | 绕过x-zse-96签名 |
+| 贴吧 | 论坛 | JSON API | ~10条/s | 评论采集 |
+| 小红书 | 内容 | v3持久化浏览器+SSR | ~0.5条/s | 阿里系反爬对抗 |
+| 抖音 | 短视频 | X-Bogus+v3浏览器 | ~0.5条/s | 签名算法破解 |
+| 闲鱼 | 二手 | v3持久化浏览器+DOM | ~0.3条/s | 扫码登录持久化 |
+| QQ群 | 社交IM | NapCatQQ WS+HTTP | 实时 | 双模式(监听+拉取) |
+
+**反爬策略**：UA池 + webdriver隐藏 + Cookie注入 + 随机间隔 + 首页预热 + 验证码检测
+
+---
+
+## 智能清洗
+
+6步管道全部零LLM调用。核心是**作者感知去重 + 平台专属噪声过滤**。
+
+### 平台专属过滤策略
+
+不同平台的噪声特征完全不同，我们为每个平台定制了专属规则：
+
+| 平台 | 专属处理 |
 |------|---------|
-| QQ群 | Q群管家/QQ安全中心等系统账号消息直接丢弃(作者名过滤) |
-| QQ群 | [CQ:face]表情码去除、筹备中bot消息模式匹配 |
-| 微博 | 转发链去除、话题#保留 |
-| 通用 | 硬广告关键词过滤 + 情报信号词保护(淘宝/出租/预付/不封号/风控/上号) |
+| **QQ群** | Q群管家/QQ安全中心等系统账号 → 作者名过滤直接丢弃；筹备中bot消息模式匹配；[CQ:face]表情码去除 |
+| **微博** | 转发链去除(//@...)、话题#保留、O网页链接清理 |
+| **知乎** | 长文模板噪声、感谢/收藏类低质回复 |
+| **小红书** | 商品标签噪声、重复模板文案 |
+| **通用** | 硬广告关键词过滤 + **情报信号词保护**（含淘宝/出租/预付/不封号/风控/上号时自动跳过广告判定） |
 
-### 3.4 智能研判层 (`analyzer/`)
+### 输出状态
 
-研判引擎基于**状态机 Agent**，按序执行，根据中间结果动态决策：
-
-```
-Step 1: classify         风险分类 (L1关键词→L2 RoBERTa→L3 LLM)
-Step 2: extract_entities 实体抽取 (正则→词典→Milvus向量→LLM)
-Step 3: decide_tools     工具决策 (根据已有结果决定后续步骤)
-Step 4: graph_expand     图谱扩线 (有可扩线实体才执行)
-Step 5: slang_normalize  黑话归一 + 新黑话候选发现
-Step 6: extract_evidence 证据片段提取
-Step 7: risk_score       综合风险评分
-Step 8: generate_report  摘要与处置建议
-Step 9: persist          多库同步写入
-```
-
-**风险分类三级级联**：
-- L1 规则层：从 `config/risk_rules.yaml` 加载关键词/正则/组合规则
-- L2 小模型层：RoBERTa 文本分类（可训练，`scripts/modeling/train_roberta.py`）
-- L3 LLM层：前两层无法判断时调用 DeepSeek，支持自动降级
-
-**实体抽取四级级联**：
-- L1 正则：手机号/微信/QQ/邮箱/URL/域名/IP/银行卡/支付宝/虚拟币钱包
-- L2 词典：MySQL `dim_slang_dict` 已知黑话
-- L3 向量：Milvus 相似黑话检索
-- L4 LLM：复杂工具名/风险标签/隐晦黑话
-
-**黑话处理**：
-- 已知黑话命中 `dim_slang_dict` → 输出标准释义
-- 疑似新黑话由 embedding/LLM 发现 → 写入候选状态 → 前端"知识库"待人工确认
-- 形成"发现 → 候选 → 确认 → 入库"的数据飞轮
-
-### 3.5 知识图谱 (`storage/neo4j_store.py`)
-
-Neo4j 保存实体和关系，用于扩线发现：
-
-**6类节点**：Intel(情报) | Account(账号) | Contact(联系方式) | Link(链接) | Tool(工具) | Slang(黑话)
-
-**5类关系**：USES_ACCOUNT | USES_CONTACT | PROMOTES_LINK | PROMOTES_TOOL | USES_SLANG | CO_OCCURS
-
-图谱扩线回答三个核心问题：
-1. 当前账号/链接以前是否出现过？
-2. 是否和其他账号共享联系方式/链接/工具？
-3. 能否形成疑似团伙或作恶链路？
-
-### 3.6 多库存储
-
-| 存储 | 角色 | 内容 |
-|------|------|------|
-| **MySQL** | 主业务库 | ods_raw_intel(原始) → dwd_clean_intel(清洗) → dwd_intel_analysis(研判) → dwd_entity(实体) → dim_slang_dict(黑话词典) → analysis_job(任务) |
-| **Neo4j** | 图谱扩线 | 实体节点 + 关系边，支持团伙关联发现 |
-| **Milvus** | 向量检索 | slang_embeddings(黑话相似) + intel_embeddings(情报相似) |
-| **Doris** | OLAP聚合 | intel_analysis_wide(宽表)，ChatBI 数据底座 |
-
-Doris/Milvus 不可用时自动降级，不影响核心流程。
+| 状态 | 含义 | 下游动作 |
+|------|------|---------|
+| CLEANED | 通过 | 进入研判队列 |
+| SIMILAR | 不同作者相似内容 | 保留（跨作者情报信号） |
+| MEDIA_ONLY | 纯图片/视频占位 | 保留（待OCR处理） |
+| DISCARDED | 噪声/同作者重复 | 不进入后续 |
 
 ---
 
-## 4. 前端界面 (`ui/`)
+## 智能研判
+
+研判引擎基于**状态机 Agent**，按序执行并根据中间结果动态决策是否需要图谱扩线/黑话归一：
+
+### 三级风险分类（L1→L2→L3 级联，自动降级）
+
+```
+L1 规则层（关键词+正则，毫秒级）→ L2 小模型层（RoBERTa，可训练）→ L3 LLM层（DeepSeek，兜底）
+```
+
+命中即返回，不浪费算力。LLM连续失败5次自动断路器降级。
+
+### 四级实体抽取（同样级联）
+
+```
+L1 正则（手机号/微信/QQ/邮箱/URL/域名/IP/银行卡/支付宝/钱包）→ L2 词典（已知黑话）
+→ L3 向量（Milvus相似黑话检索）→ L4 LLM（复杂工具名/隐晦黑话）
+```
+
+### 黑话处理闭环
+
+```
+已知黑话命中词典 → 输出标准释义
+疑似新词 → candidate状态 → 前端待确认 → 确认后更新词典+Milvus索引
+```
+
+不是一次性识别，而是**持续演化的数据飞轮**。
+
+### 知识图谱扩线
+
+Neo4j保存6类节点（Intel/Account/Contact/Link/Tool/Slang）和6类关系，回答：
+
+1. 这个账号/链接以前出现过吗？
+2. 它和谁共享联系方式/工具？
+3. 能形成疑似团伙链路吗？
+
+---
+
+## AI 钓鱼人物（Persona Engine）
+
+主动情报收集是系统区别于纯被动采集的重要差异化能力。
+
+```
+YAML人物配置 → 选择目标 → AI发起对话 → 逐轮安全检查 → 对话结束 → LLM提取结构化情报
+```
+
+每位人物配置文件包含：
+- **身份设定**：角色、经验水平、动机、领域知识、预算
+- **对话风格**：语气、语言、提问模式、典型开场白
+- **安全护栏**：最大轮次、禁止行为、4类退出条件
+- **情报目标**：服务定价、操作流程、收款方式、联系渠道、工具栈等
+
+**流式实时展示**：对话逐轮刷新，每条AI消息标注安全检查结果。**角色自定义编辑器**支持字段级覆盖。
+
+---
+
+## 前端（8页面 Streamlit 仪表盘）
 
 启动：`python main.py ui` → http://localhost:8600
 
-**8 个页面，按推荐演示顺序排列**：
+| 页面 | 一句话功能 |
+|------|---------|
+| 🎯 **灰黑产情报分析Agent** | 一键全流程：采→洗→研→库，实时进度，严格ID串联 |
+| 总览 / ChatBI | 态势总览 + 风险分布趋势 + 自然语言问答 |
+| 🎣 **钓鱼模拟** | 流式实时对话 + 角色自定义 + 结构化情报提取 |
+| 采集器管理 | 7平台独立采集，选关键词→一键触发 |
+| 数据清洗 | 批量清洗预览，展示去重/角色分类/噪声评分详情 |
+| 研判工作台 | 单条情报深度分析：分类/实体/证据/图谱 |
+| 情报池 | 全量数据按状态筛选，批量提交研判 |
+| 知识库 | 实体浏览 + 黑话词典管理 + 候选审核 |
+| 系统状态 | MySQL/Neo4j/Milvus/Doris 实时连接状态 |
 
-| # | 页面 | 路由 | 核心功能 |
-|:--:|------|------|------|
-| 1 | 🎯 **灰黑产情报分析Agent** | `?page=pipeline` | **一键全流程**：选平台+关键词→自动采集(实时计数)→清洗(逐条进度)→研判(内容预览)→多库同步。严格ID串联，只处理当次采集数据 |
-| 2 | 总览 / ChatBI | `?page=overview` | 数据概览、风险分布趋势、自然语言态势问答 |
-| 3 | 🎣 **钓鱼模拟** | `?page=persona` | **流式实时对话**：3个AI人物可选+角色自定义编辑+6场景预设，对话气泡逐轮刷新，自动提取结构化情报 |
-| 4 | 采集器管理 | `?page=collector` | 7平台卡片，独立选择关键词和页数，一键触发采集，实时日志 |
-| 5 | 数据清洗 | `?page=cleaning` | 批量清洗+前后预览，展示作者感知去重/角色分类/噪声评分详情 |
-| 6 | 研判工作台 | `?page=workbench` | 查看单条情报的分类/实体/证据/黑话/风险评分/图谱扩线 |
-| 7 | 情报池 | `?page=intel_pool` | 全量情报列表，按状态筛选(待清洗/待研判/已研判/已丢弃)，批量提交 |
-| 8 | 知识库 | `?page=knowledge` | 实体库浏览、黑话词典管理、候选黑话审核、图谱扩线入口 |
-| 9 | 系统状态 | `?page=system` | MySQL/Neo4j/Milvus/Doris 实时连接状态 |
-
-**页面设计原则**：
-- 全流程页面（情报分析Agent）整合完整链路，用于比赛开场演示（2分钟）
-- 钓鱼模拟页面展示主动情报收集能力，体现系统差异化
-- 其余页面拆分展示各环节细节，方便评委深入了解
-
-**ChatBI 轻量问答**：
-
-采用"白名单问题 → 固定SQL"模式，避免 LLM 自由生成 SQL 的风险。支持：风险分布、平台高危排行、热门黑话、高危样本、待研判队列等。
+**导航顺序即为推荐演示顺序**：先全流程(2min) → 钓鱼模拟(2min) → 情报池纵览 → 研判详情 → 知识库 → ChatBI → 系统状态。
 
 ---
 
-## 5. 命令速查
+## 存储架构
+
+| 存储 | 角色 | 内容 |
+|------|------|------|
+| **MySQL** | 主业务库 | ODS(原始)→DWD(清洗+研判+实体)→DIM(黑话词典)→ADS(案件聚合)→任务表，完整分层 |
+| **Neo4j** | 图谱扩线 | 实体节点+关系边，发现共享账号/联系/工具的疑似团伙 |
+| **Milvus** | 向量检索 | 黑话词向量(变体发现) + 情报文本向量(相似检索) |
+| **Doris** | OLAP | 研判宽表聚合，ChatBI 数据底座。不可用时自动降级到MySQL |
+
+---
+
+## 技术栈总览
+
+| 层次 | 技术 |
+|------|------|
+| 采集 | HTTP API + Playwright(v3持久化) + WebSocket(NapCatQQ) |
+| 清洗 | SimHash + 正则 + Emoji语义映射(100+条目，零LLM) |
+| 分类 | L1规则 → L2 RoBERTa → L3 LLM(DeepSeek) |
+| 实体 | L1正则 → L2词典 → L3 Milvus向量 → L4 LLM |
+| LLM | DeepSeek API（兼容 OpenAI 接口，可替换） |
+| 存储 | MySQL + Neo4j + Milvus + Doris |
+| 服务 | FastAPI + Streamlit |
+| 部署 | Docker Compose 一键启动全部基础设施 |
+
+---
+
+## 快速开始
 
 ```bash
-cd BGI/
-
-# 环境
+# 进入项目目录后
 pip install -r requirements.txt
 playwright install chromium
 
-# 基础设施
+# 启动基础设施（MySQL + Neo4j + Milvus）
 docker compose -f docker/docker-compose.yml up -d
 
-# 初始化（答辩推荐 --reset 清空重建）
+# 初始化数据库（首次或重建）
 python main.py init-db --reset
 
 # 导入示例数据（7平台 10,248条）
 python scripts/demo.py load
 
-# ===== 采集 =====
-python main.py collect -p weibo -k "刷单" --max-pages 5        # 微博 ~8条/s
-python main.py collect -p zhihu -k "刷单,接码" --max-pages 5    # 知乎 ~5条/s
-python main.py collect -p xiaohongshu -k "刷单" --max-pages 3   # 小红书
-python main.py collect -p douyin -k "刷单" --max-pages 3        # 抖音
-python main.py collect -p tieba -k "刷单" --max-pages 2         # 贴吧
-python main.py login-xianyu                                      # 闲鱼首次登录
-python main.py collect -p xianyu -k "账号交易" --max-pages 2    # 闲鱼
-python main.py collect -p qq_group --mode both --duration 60     # QQ群
+# 启动前端
+python main.py ui          # → http://localhost:8600
 
-# ===== 清洗 + 研判 =====
-python main.py clean -l 500         # 清洗（或通过UI操作）
-python main.py analyze -l 200       # 研判（或通过UI提交）
+# 或：命令行采集+清洗+研判
+python main.py collect -p weibo -k "刷单" --max-pages 3
+python main.py clean -l 500
+python main.py analyze -l 200
 
-# ===== 人物钓鱼 =====
-python main.py persona list                                               # 列出人物
-python main.py persona run -p ecommerce_buyer -t "xianyu:uid:name:context" # 单目标
-python main.py persona run-batch -p ecommerce_buyer -f targets.json        # 批量
+# 人物钓鱼
+python main.py persona list
+python main.py persona run -p ecommerce_buyer -t "xianyu:uid:name:context"
 
-# ===== 服务 =====
-python main.py ui                    # Streamlit → http://localhost:8600
-python main.py api --port 8000       # FastAPI  → http://localhost:8000
-
-# ===== 一键演示 =====
-python scripts/demo.py full          # Docker→建表→导数据→采集→UI
+# 一键演示
+python scripts/demo.py full
 ```
 
 ---
 
-## 6. API 接口
-
-启动：`python main.py api`
-
-| 方法 | 路径 | 作用 |
-|------|------|------|
-| GET | `/health` | 健康检查 |
-| GET | `/api/stats` | 看板统计数据 |
-| GET | `/api/intel` | 情报列表(支持筛选和分页) |
-| GET | `/api/intel/{raw_id}` | 单条情报详情 |
-| GET | `/api/entities` | 实体列表 |
-| GET | `/api/entities/{entity_id}/graph` | 实体周边图谱 |
-| GET | `/api/slang` | 黑话词典 |
-| POST | `/internal/v1/agent/analyze` | 同步研判 |
-| POST | `/api/analysis/jobs` | 异步提交研判任务 |
-| POST | `/api/analysis/jobs/batch` | 批量提交研判 |
-| GET | `/api/analysis/jobs/{job_id}` | 查询任务进度 |
-
----
-
-## 7. 配置
-
-编辑 `.env` 文件（参考 `.env.template`）：
-
-```env
-# MySQL
-BGI_MYSQL_HOST=localhost
-BGI_MYSQL_PORT=3306
-BGI_MYSQL_USER=bagi
-BGI_MYSQL_PASSWORD=bagi2026pass
-BGI_MYSQL_DATABASE=bagi_intel
-
-# Neo4j
-BGI_NEO4J_URI=bolt://localhost:7687
-BGI_NEO4J_USER=neo4j
-BGI_NEO4J_PASSWORD=bagi2026neo4j
-
-# Milvus
-BGI_MILVUS_HOST=localhost
-BGI_MILVUS_PORT=19530
-
-# LLM (DeepSeek 或其他兼容接口)
-BGI_LLM_API_KEY=your_api_key
-BGI_LLM_API_BASE=https://api.deepseek.com/v1
-BGI_LLM_MODEL=deepseek-chat
-
-# Doris (可选，不可用自动降级)
-BGI_DORIS_ENABLED=true
-BGI_DORIS_HOST=localhost
-BGI_DORIS_PORT=9030
-```
-
----
-
-## 8. 数据库设计
-
-### MySQL 核心表
-
-| 表 | 层级 | 用途 |
-|------|:--:|------|
-| `ods_raw_intel` | ODS | 原始情报，7平台统一格式，包含处理状态 |
-| `dwd_clean_intel` | DWD | 清洗结果：clean_text、simhash、内容角色、去重状态 |
-| `dwd_intel_analysis` | DWD | 研判结果：风险分类、评分、证据、摘要、版本控制 |
-| `dwd_entity` | DWD | 实体库：账号/联系方式/链接/黑话/工具，含抽取方式和置信度 |
-| `dwd_entity_relation` | DWD | 实体关系：共现和推断关系 |
-| `dim_slang_dict` | DIM | 黑话词典：active/candidate/deprecated 状态 |
-| `ads_risk_case` | ADS | 风险案件聚合 |
-| `agent_report` | ADS | Agent 摘要+证据+处置建议归档 |
-| `annotation_log` | — | 人工修正日志(HITL闭环) |
-| `analysis_job` | — | 异步研判任务状态 |
-
-### Neo4j 图模型
+## 项目目录
 
 ```
-(Intel)-[:USES_ACCOUNT]->(Account)
-(Intel)-[:USES_CONTACT]->(Contact)
-(Intel)-[:PROMOTES_LINK]->(Link)
-(Intel)-[:PROMOTES_TOOL]->(Tool)
-(Intel)-[:USES_SLANG]->(Slang)
-(实体A)-[:CO_OCCURS]->(实体B)   // 共享出现
-```
-
-### Milvus 集合
-
-- `slang_embeddings`：黑话词向量（MiniLM），用于变体黑话发现
-- `intel_embeddings`：情报文本向量，用于相似情报检索
-
----
-
-## 9. 项目目录
-
-```
-BGI/
-├── agents/         图谱扩线、报告摘要等 Agent 辅助模块
-├── analyzer/       风险分类、实体抽取、证据提取、风险评分、状态机、异步worker
+├── collectors/     7平台采集器 + 统一IntelItem + 注册中心
+├── cleaner/        6步零LLM清洗管道（Emoji翻译/平台过滤/作者感知去重/噪声评分/内容角色）
+├── analyzer/       状态机Agent + 三级分类 + 四级实体 + 证据 + 评分 + 异步worker
+├── persona/        AI钓鱼人物引擎（YAML配置/流式对话/安全护栏/批处理）
+├── agents/         图谱扩线 + 报告摘要
+├── bridges/        NapCatQQ桥接（QQ群采集）
+├── storage/        MySQL/Neo4j/Milvus/Doris 访问层
 ├── api/            FastAPI RESTful 接口
-├── bridges/        NapCatQQ WebSocket 桥接(QQ群采集)
-├── cleaner/        Emoji翻译 + 平台过滤 + 作者感知去重 + 噪声评分 + 内容角色分类
-├── collectors/     7平台采集器(10 Spider + 7 Collector + 注册中心)
-├── config/         配置与风险规则(risk_rules.yaml)
-├── data/           模型、黑话词典、示例数据
-├── docker/         Docker Compose(MySQL/Neo4j/Milvus/Doris)
-├── persona/        AI钓鱼人物引擎(YAML配置+流式对话+安全护栏)
-├── scripts/
-│   ├── demo.py     一键演示脚本
-│   ├── importers/  JSONL数据导入
-│   └── modeling/   RoBERTa训练脚本
-├── services/       业务服务层
-├── storage/        MySQL/Neo4j/Milvus/Doris 访问层(懒加载单例)
-├── tests/          单元测试
-├── ui/             Streamlit 前端
+├── ui/             Streamlit 8页面仪表盘
 │   └── views/
-│       ├── pipeline.py      🎯 全自动流水线
-│       ├── persona.py       🎣 钓鱼模拟(流式实时对话)
+│       ├── pipeline.py      全自动流水线
+│       ├── persona.py       钓鱼模拟（流式对话）
 │       ├── collector.py     采集器管理
 │       ├── cleaning.py      数据清洗
 │       ├── workbench.py     研判工作台
 │       ├── intel_pool.py    情报池
 │       ├── overview.py      总览/ChatBI
-│       ├── knowledge.py     知识库
-│       └── system_status.py 系统状态
-├── main.py          CLI 入口(click命令组)
-├── schema.py        共享枚举与数据结构
-└── README.md        项目说明文档
+│       └── knowledge.py     知识库
+├── config/         配置 + 风险规则(risk_rules.yaml)
+├── scripts/        demo脚本 + JSONL导入 + RoBERTa训练
+├── tests/          单元测试
+├── docker/         Docker Compose编排
+├── main.py         CLI入口
+└── README.md
 ```
 
 ---
 
-## 10. 比赛演示建议（12分钟）
+## 配置
 
-| 时间 | 环节 | 页面 | 操作 |
-|:--:|------|------|------|
-| 0-2min | **开场：全流程** | 情报分析Agent | 选微博+"刷单"→一键启动→实时展示采集→清洗→研判→入库全过程 |
-| 2-4min | **主动情报** | 钓鱼模拟 | 选"电商卖家小张"+预设"刷单服务"场景→流式对话→提取结构化情报 |
-| 4-5min | **数据纵览** | 情报池 | 展示7平台数据已统一入库，按状态筛选 |
-| 5-7min | **深度研判** | 研判工作台 | 打开一条高危情报，展示分类/实体/证据/黑话/图谱 |
-| 7-8min | **数据飞轮** | 知识库 | 展示候选黑话→人工确认→词典更新闭环 |
-| 8-9min | **态势问答** | 总览/ChatBI | "哪个平台高危最多""最近热门黑话" |
-| 9-10min | **自定义展示** | 钓鱼模拟 | 展示角色自定义编辑，证明系统灵活性 |
-| 10-11min | **工程完整性** | 系统状态 | MySQL/Neo4j/Milvus/Doris 全部在线 |
-| 11-12min | **收尾** | 情报分析Agent | 回到全流程页面，总结"采→洗→研→库"闭环 |
+```env
+# MySQL
+BGI_MYSQL_HOST=localhost:3306
+BGI_MYSQL_USER=bagi
+BGI_MYSQL_PASSWORD=bagi2026pass
 
----
+# Neo4j
+BGI_NEO4J_URI=bolt://localhost:7687
 
-## 11. 当前不足与后续规划
+# LLM
+BGI_LLM_API_KEY=your_key
+BGI_LLM_API_BASE=https://api.deepseek.com/v1
+BGI_LLM_MODEL=deepseek-chat
+```
 
-| 问题 | 建议 |
-|------|------|
-| L2 RoBERTa 模型需GPU训练 | 使用 4090 训练，验证集 F1 写入答辩材料 |
-| MEDIA_ONLY 消息缺乏OCR处理 | 接入 PaddleOCR 管道处理图片类消息 |
-| 候选黑话需更强的HITL流程 | 前端"通过/驳回/编辑释义"后自动刷新词典和Milvus |
-| 图谱扩线在小样本时冲击力有限 | 准备共享微信/手机号/域名的演示数据 |
-| 评测指标体系待完善 | 增加分类准确率、实体抽取准确率、平均研判耗时、LLM调用比例 |
+详见 `.env.template`。
 
 ---
 
-## 12. 一句话
+## 后续规划
 
-**BGI 将黑灰产情报从"逐平台手动搜索→逐条阅读→手工摘录"的传统模式，升级为"一键采集→自动清洗→智能研判→图谱扩线→多库沉淀"的全自动闭环。**
+- L2 RoBERTa 模型 GPU 训练并写入答辩指标
+- MEDIA_ONLY 消息接入 PaddleOCR 管道
+- 候选黑话 HITL 流程强化（前端一键审核→自动更新词典+Milvus）
+- 图谱扩线演示数据集（共享微信/手机号/域名 的团伙场景）

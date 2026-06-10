@@ -15,8 +15,8 @@ from ui.views import collector, cleaning, intel_pool, knowledge, overview, perso
 
 
 st.set_page_config(
-    page_title="BGI 黑灰产情报研判",
-    page_icon="B",
+    page_title="黑灰产情报分析Agent",
+    page_icon="🕵️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -56,8 +56,8 @@ def _sidebar():
         st.markdown(
             """
             <div style='padding:0.4rem 0.4rem 1rem'>
-              <div style='font-size:1.2rem;font-weight:800;color:#FFFFFF'>BGI</div>
-              <div style='font-size:0.72rem;color:#92A1AF;margin-top:2px'>黑灰产情报研判 Agent</div>
+              <div style='font-size:1.15rem;font-weight:800;color:#FFFFFF'>🕵️ 黑灰产情报分析</div>
+              <div style='font-size:0.7rem;color:#92A1AF;margin-top:2px'>Agent · 全链路自动化</div>
             </div>
             """,
             unsafe_allow_html=True,
