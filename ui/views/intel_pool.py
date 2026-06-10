@@ -108,7 +108,7 @@ def render_pool(include_header: bool = True):
     b1.metric("当前结果", len(rows))
     b2.metric("待清洗", len(pending_clean),
               delta=None if not pending_clean else f"{len(pending_clean)}条需处理")
-    b3.metric("待初筛", len(cleaned_ready))
+    b3.metric("待研判", len(cleaned_ready))
     b4.metric("待复核/升级", len(screened))
     b5.metric("待人工复核", len(review_ready))
 

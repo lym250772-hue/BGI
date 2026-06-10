@@ -23,11 +23,12 @@ import time
 import json
 import re
 import random
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from urllib.parse import quote
 from loguru import logger
 
+from collectors.base import now_bjt
 from collectors.spiders.base_spider import BaseSpider, random_ua
 
 
@@ -217,7 +218,7 @@ class XiaohongshuSearchSpider(BaseSpider):
                         continue
                     all_items.append(item)
                     new_count += 1
-                    self._update_last_collected(keyword, item.collected_at or datetime.utcnow())
+                    self._update_last_collected(keyword, item.collected_at or now_bjt())
 
                     if max_items and len(all_items) >= max_items:
                         break
@@ -364,7 +365,7 @@ class XiaohongshuSearchSpider(BaseSpider):
                 # 时间
                 time_ts = r.get('time', 0)
                 note_time = self.ts_to_datetime(time_ts / 1000) if time_ts > 1e12 else (
-                    self.ts_to_datetime(time_ts) if time_ts else datetime.utcnow()
+                    self.ts_to_datetime(time_ts) if time_ts else now_bjt()
                 )
 
                 # 构建 URL（带 xsec_token 才能直接访问）
@@ -493,7 +494,7 @@ class XiaohongshuSearchSpider(BaseSpider):
                     author_uid=author_id,
                     author_username=author_name,
                     note_id=note_id,
-                    collected_at=datetime.utcnow(),
+                    collected_at=now_bjt(),
                     keyword=keyword,
                     like_count=like_count,
                     metadata={

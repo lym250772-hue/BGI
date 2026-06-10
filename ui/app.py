@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import streamlit as st
 
 import ui.theme as T
-from ui.views import collector, cleaning, intel_pool, knowledge, overview, system_status, workbench
+from ui.views import collector, cleaning, intel_pool, knowledge, overview, persona, pipeline, system_status, workbench
 
 
 st.set_page_config(
@@ -24,7 +24,9 @@ st.set_page_config(
 st.markdown(T.CSS, unsafe_allow_html=True)
 
 PAGES = {
+    "pipeline": ("🎯 情报工厂", pipeline.show),
     "overview": ("总览 / ChatBI", overview.show),
+    "persona": ("🎣 钓鱼模拟", persona.show),
     "collector": ("采集器管理", collector.show),
     "cleaning": ("数据清洗", cleaning.show),
     "workbench": ("研判工作台", workbench.show),

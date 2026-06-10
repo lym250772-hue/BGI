@@ -612,11 +612,25 @@ class CleaningPipeline:
             if stripped_strip and len(stripped.strip()) <= 2:
                 is_media_only = True
 
-        # Step 0: Emoji 提取
+        # Step 0: 平台+作者快速噪声判定
+        # QQ群系统账号（Q群管家等）的消息一律为噪声，不进入后续处理
+        if platform == "qq_group" and author_username:
+            QQ_SYSTEM_AUTHORS = ["Q群管家", "QQ安全中心", "群助手", "系统消息"]
+            if any(a in author_username for a in QQ_SYSTEM_AUTHORS):
+                return {
+                    "text": text, "original": original, "simhash": "0x0000000000000000", "md5": "",
+                    "is_noise": True, "is_media_only": False,
+                    "content_role": "unknown", "noise_reason": f"QQ系统账号: {author_username}",
+                    "noise_score": 1.0, "priority": "normal",
+                    "should_discard": True,
+                    "status": "DISCARDED", "steps": {},
+                }
+
+        # Step 1: Emoji 提取
         emoji_result = self._step_emoji(text)
         steps["emoji"] = emoji_result
 
-        # Step 1: 平台感知清洗（使用原始文本，避免 emoji 翻译稀释密度影响判断）
+        # Step 2: 平台感知清洗（使用原始文本，避免 emoji 翻译稀释密度影响判断）
         platform_result = self._step_platform(platform, text)
         text_cleaned = platform_result["text"]
         steps["platform"] = platform_result

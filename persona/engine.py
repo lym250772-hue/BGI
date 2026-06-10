@@ -39,6 +39,8 @@ class PersonaEngine:
         target_username: str,
         target_context: str,
         initial_message: str = None,
+        profile_override: dict = None,
+        turn_callback: callable = None,
     ) -> PersonaIntelItem:
         """执行一次完整的钓鱼对话。
 
@@ -49,11 +51,22 @@ class PersonaEngine:
             target_username: 目标昵称
             target_context: 目标商品/卖家描述
             initial_message: 可选的初始消息（不提供则LLM生成）
+            profile_override: 可选的人物设定覆盖 dict
+            turn_callback: 可选回调，每轮对话后调用 callback(state) 用于实时展示
 
         Returns:
             PersonaIntelItem: 对话结果 + 提取情报
         """
         profile = load_persona(persona_name)
+        # 合并自定义覆盖
+        if profile_override:
+            for section in ["identity", "conversation_style", "safety", "intelligence_goals"]:
+                if section in profile_override and profile_override[section]:
+                    if isinstance(profile_override[section], dict):
+                        profile.setdefault(section, {}).update(profile_override[section])
+                    elif isinstance(profile_override[section], list):
+                        if profile_override[section]:
+                            profile[section] = profile_override[section]
         state = ConversationState(
             persona_name=persona_name,
             target_platform=target_platform,
@@ -84,6 +97,8 @@ class PersonaEngine:
 
         state.add_turn("persona", first_msg)
         logger.debug(f"  [人物]: {first_msg[:80]}...")
+        if turn_callback:
+            turn_callback(state)
 
         # ── 第2步: 对话循环 ──────────────────────────────────────
         seller_history = []  # [{"role": "user", "content": ...}] for LLM context
@@ -108,6 +123,8 @@ class PersonaEngine:
             state.add_turn("seller", seller_msg)
             seller_history.append({"role": "user", "content": seller_msg})
             logger.debug(f"  [卖家]: {seller_msg[:80]}...")
+            if turn_callback:
+                turn_callback(state)
 
             # 2c. 检查退出条件
             should_exit, reason = SafetyGuard.should_exit(
@@ -143,12 +160,105 @@ class PersonaEngine:
 
             state.add_turn("persona", persona_response)
             logger.debug(f"  [人物]: {persona_response[:80]}...")
+            if turn_callback:
+                turn_callback(state)
 
         # 标记结束
         if state.status == ConversationStatus.ACTIVE:
             state.status = ConversationStatus.COMPLETED
 
         return self._finalize(state, profile)
+
+    def run_conversation_stream(
+        self,
+        persona_name: str,
+        target_platform: str,
+        target_uid: str,
+        target_username: str,
+        target_context: str,
+        initial_message: str = None,
+        profile_override: dict = None,
+    ):
+        """流式对话生成器 — 每轮对话后 yield state，供 UI 实时展示。
+
+        Usage:
+            for state in engine.run_conversation_stream(...):
+                # 渲染 state.turns 到 UI
+                st.rerun()  # 每次 yield 后刷新页面
+        """
+        profile = load_persona(persona_name)
+        if profile_override:
+            for section in ["identity", "conversation_style", "safety", "intelligence_goals"]:
+                if section in profile_override and profile_override[section]:
+                    if isinstance(profile_override[section], dict):
+                        profile.setdefault(section, {}).update(profile_override[section])
+                    elif isinstance(profile_override[section], list) and profile_override[section]:
+                        profile[section] = profile_override[section]
+
+        state = ConversationState(
+            persona_name=persona_name,
+            target_platform=target_platform,
+            target_uid=target_uid,
+            target_username=target_username,
+            target_context=target_context,
+            status=ConversationStatus.ACTIVE,
+        )
+
+        profile_safety = profile.get("safety", {})
+
+        # 开场消息
+        if initial_message:
+            first_msg = initial_message
+        else:
+            first_msg = self.llm.generate_response(profile, [], target_context)
+        check = SafetyGuard.check_outgoing(first_msg)
+        if not check["safe"]:
+            first_msg = SafetyGuard.safe_fallback_message()
+        state.add_turn("persona", first_msg)
+        yield state
+
+        # 对话循环
+        seller_history = []
+        for turn_num in range(1, profile_safety.get("max_turns", 10)):
+            seller_msg = self._simulate_seller(profile, state, target_context)
+            check = SafetyGuard.check_incoming(seller_msg)
+            if not check["safe"]:
+                state.safety_flags.extend(check["flags"])
+                state.status = ConversationStatus.SAFETY_ABORT
+                state.add_turn("seller", seller_msg)
+                yield state
+                break
+
+            state.add_turn("seller", seller_msg)
+            seller_history.append({"role": "user", "content": seller_msg})
+            yield state
+
+            should_exit, reason = SafetyGuard.should_exit(turn_num, profile_safety, seller_msg)
+            if should_exit:
+                state.status = (
+                    ConversationStatus.COMPLETED if reason == "max_turns_reached"
+                    else ConversationStatus.SAFETY_ABORT
+                )
+                break
+
+            history = [
+                {"role": "user", "content": state.turns[i]["content"]}
+                if state.turns[i]["role"] == "seller"
+                else {"role": "assistant", "content": state.turns[i]["content"]}
+                for i in range(len(state.turns))
+            ]
+            persona_response = self.llm.generate_response(profile, history, target_context)
+            check = SafetyGuard.check_outgoing(persona_response)
+            if not check["safe"]:
+                persona_response = SafetyGuard.safe_fallback_message()
+            state.add_turn("persona", persona_response)
+            yield state
+
+        if state.status == ConversationStatus.ACTIVE:
+            state.status = ConversationStatus.COMPLETED
+        # 最后 yield: 包含最终 intel
+        final = self._finalize(state, profile)
+        yield (state, final)
 
     def _simulate_seller(
         self, profile: dict, state: ConversationState, target_context: str,

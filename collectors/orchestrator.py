@@ -283,7 +283,7 @@ class CollectionOrchestrator:
                 # Keyword done — clear checkpoint
                 spider._clear_checkpoint(kw)
                 if task.incremental:
-                    spider._update_last_collected(kw, datetime.utcnow())
+                    spider._update_last_collected(kw, now_bjt())
 
         finally:
             try:
@@ -394,7 +394,7 @@ def _parsed_to_dict(parsed, platform: str) -> dict:
         "content_type": getattr(parsed, "content_type", "text"),
         "content_raw": getattr(parsed, "content_raw", ""),
         "publish_time": getattr(parsed, "collected_at", None),
-        "collect_time": datetime.utcnow(),
+        "collect_time": now_bjt(),
         "raw_status": "RAW_COLLECTED",
         "media_urls": _json.dumps(_collect_media_urls(parsed), ensure_ascii=False),
         "media_hash": _compute_media_hash(parsed),
@@ -500,7 +500,7 @@ def _comment_to_dict(comment: dict, platform: str, *,
         "content_type": "comment",
         "content_raw": text,
         "publish_time": comment.get("created_at") or comment.get("created_time"),
-        "collect_time": datetime.utcnow(),
+        "collect_time": now_bjt(),
         "raw_status": "RAW_COLLECTED",
         "media_urls": _json.dumps([]),
         "media_hash": "",

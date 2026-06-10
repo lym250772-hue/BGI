@@ -25,12 +25,13 @@ import random
 import execjs
 import requests
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from urllib.parse import quote
 from loguru import logger
 from playwright.sync_api import sync_playwright
 
+from collectors.base import now_bjt
 from collectors.spiders.base_spider import BaseSpider
 
 
@@ -288,7 +289,7 @@ class DouyinSearchSpider(BaseSpider):
                         continue
                     all_items.append(item)
                     new_count += 1
-                    self._update_last_collected(keyword, item.collected_at or datetime.utcnow())
+                    self._update_last_collected(keyword, item.collected_at or now_bjt())
                     if max_items and len(all_items) >= max_items:
                         break
 
@@ -476,7 +477,7 @@ class DouyinSearchSpider(BaseSpider):
             author_uid=author_uid,
             author_username=author_name,
             aweme_id=aweme_id,
-            collected_at=self.ts_to_datetime(create_time) if create_time else datetime.utcnow(),
+            collected_at=self.ts_to_datetime(create_time) if create_time else now_bjt(),
             keyword=keyword,
             like_count=int(statistics.get("digg_count", 0) or statistics.get("diggCount", 0)),
             comment_count=int(statistics.get("comment_count", 0) or statistics.get("commentCount", 0)),
@@ -590,7 +591,7 @@ class DouyinSearchSpider(BaseSpider):
                     source_url=f"https://www.douyin.com/video/{video_id}",
                     author_username=author_name,
                     aweme_id=video_id,
-                    collected_at=datetime.utcnow(),
+                    collected_at=now_bjt(),
                     keyword=keyword,
                     metadata={
                         "keyword": keyword,

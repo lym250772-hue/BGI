@@ -5,7 +5,7 @@ from datetime import datetime
 
 from loguru import logger
 
-from collectors.base import BaseCollector, IntelItem
+from collectors.base import now_bjt,  BaseCollector, IntelItem
 from collectors.spiders.tieba_spider import TiebaSpider
 
 
@@ -89,6 +89,6 @@ class TiebaCollector(BaseCollector):
             author_uid=parsed.author_uid,
             author_username=parsed.author_username,
             group_id=parsed.bar_name,       # 用贴吧名作为分组标识
-            collected_at=parsed.collected_at or datetime.utcnow(),
+            collected_at=parsed.collected_at or now_bjt(),
             metadata=metadata,
         )

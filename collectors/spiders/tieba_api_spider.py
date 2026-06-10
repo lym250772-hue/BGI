@@ -15,10 +15,11 @@
 import time
 import random
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from loguru import logger
 
+from collectors.base import now_bjt
 from collectors.spiders.base_spider import BaseSpider
 
 
@@ -283,7 +284,7 @@ class TiebaAPISpider:
             bar_name=forum_name,
             keyword=keyword,
             reply_count=post_num,
-            collected_at=datetime.fromtimestamp(create_time) if create_time else datetime.utcnow(),
+            collected_at=datetime.fromtimestamp(create_time) if create_time else now_bjt(),
             metadata={
                 "keyword": keyword,
                 "bar_name": forum_name,

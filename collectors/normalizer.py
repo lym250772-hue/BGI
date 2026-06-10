@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from collectors.base import IntelItem
+from collectors.base import now_bjt,  IntelItem
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -266,7 +266,7 @@ def normalize_xianyu(item: Any) -> IntelItem:
         post_id=getattr(item, "item_id", ""),
         group_id=getattr(item, "keyword", ""),
         content_type=getattr(item, "content_type", "text"),
-        collected_at=getattr(item, "collected_at", datetime.utcnow()),
+        collected_at=getattr(item, "collected_at", now_bjt()),
         like_count=getattr(item, "like_count", 0),
         comment_count=getattr(item, "comment_count", 0),
         price=getattr(item, "price", 0.0),
@@ -309,7 +309,7 @@ def im_to_intel(im: Any) -> IntelItem:
         source_url=f"qq://group/{getattr(im, 'group_id', '')}/msg/{getattr(im, 'message_id', '')}",
         message_id=int(getattr(im, "message_id", "0")) if getattr(im, "message_id", "").isdigit() else None,
         image_urls=getattr(im, "image_urls", []) or [],
-        collected_at=getattr(im, "collected_at", datetime.utcnow()),
+        collected_at=getattr(im, "collected_at", now_bjt()),
         metadata={
             "group_id": getattr(im, "group_id", ""),
             "group_name": getattr(im, "group_name", ""),

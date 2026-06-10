@@ -772,7 +772,7 @@ class BaseSpider(ABC):
         """Unix 时间戳转 datetime。"""
         if ts and ts > 0:
             return datetime.utcfromtimestamp(ts)
-        return datetime.utcnow()
+        return now_bjt()
 
     def screenshot(self, path: str = "debug.png"):
         """调试用：保存当前页面截图。"""

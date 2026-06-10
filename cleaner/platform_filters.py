@@ -171,6 +171,7 @@ def _check_ad_noise(text: str) -> FilterResult:
         "微信号", "QQ号", "手机号", "银行卡", "实名", "身份证",
         "涨粉", "解封", "代收", "代付", "撞库", "盗号", "免杀",
         "引流", "买粉", "刷量", "群控", "云手机", "料商", "号商",
+        "淘宝", "出租", "预付", "不封号", "风控", "上号",
     ]
     if any(kw in text for kw in INTEL_SIGNAL_KW):
         return text, False, ""
@@ -502,6 +503,18 @@ QQ_SYSTEM_PATTERNS = [
     re.compile(r"邀请[^\n]*加入了群聊"),
     re.compile(r"^\[QQ红包\][^\n]*"),
     re.compile(r"^\[戳一戳\][^\n]*"),
+    # Q群管家自动消息
+    re.compile(r"Q群管家"),
+    re.compile(r"筹备中.*做兼职.*稍等"),
+    re.compile(r"投广告联系管理员"),
+    re.compile(r"想做兼职.*联系管理员"),
+    re.compile(r"联系管理员$"),
+    # 群内自动回复/机器人
+    re.compile(r"^@\d{5,}.*筹备中"),
+    re.compile(r"^@\d{5,}.*做兼职"),
+    re.compile(r"^@\d{5,}.*想做兼职"),
+    re.compile(r"^@所有人"),
+    re.compile(r"发言请先[^\n]*"),
 ]
 
 # QQ 表情代码 [CQ:face,id=xxx]

@@ -25,7 +25,7 @@ import re
 import os
 import json
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from loguru import logger
 from playwright.sync_api import sync_playwright, Browser, Page
@@ -99,6 +99,7 @@ class ZhihuSearchSpider:
     @classmethod
     def interactive_login(cls, headless: bool = False):
         """弹出浏览器完成知乎登录，并保存 Cookie 到 data/raw/zhihu_cookies.json。"""
+        from collectors.base import now_bjt
         from collectors.spiders.base_spider import BaseSpider
 
         class _ZhihuCookieLoginSpider(BaseSpider):
@@ -313,7 +314,7 @@ class ZhihuSearchSpider:
                         time.sleep(delay)
 
                     all_items.append(item)
-                    self._update_last_collected(keyword, item.collected_at or datetime.utcnow())
+                    self._update_last_collected(keyword, item.collected_at or now_bjt())
 
                 logger.info(f"  第{page_num}页: 解析 {len(items)} 条, 新增 {new_count} 条")
 
@@ -699,7 +700,7 @@ class ZhihuSearchSpider:
         """Unix 时间戳转 datetime。"""
         if ts and ts > 0:
             return datetime.utcfromtimestamp(ts)
-        return datetime.utcnow()
+        return now_bjt()
 
     # ── 调试工具 ────────────────────────────────────────────────────────────
 

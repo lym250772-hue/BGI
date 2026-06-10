@@ -5,7 +5,7 @@ from datetime import datetime
 
 from loguru import logger
 
-from collectors.base import BaseCollector, IntelItem
+from collectors.base import now_bjt,  BaseCollector, IntelItem
 from collectors.spiders.xiaohongshu_spider import XiaohongshuSearchSpider
 
 
@@ -76,7 +76,7 @@ class XiaohongshuCollector(BaseCollector):
             author_uid=parsed.author_uid,
             author_username=parsed.author_username,
             group_id=parsed.keyword,       # 用搜索关键词作为分组标识
-            collected_at=parsed.collected_at or datetime.utcnow(),
+            collected_at=parsed.collected_at or now_bjt(),
             metadata={
                 "keyword": parsed.keyword,
                 "note_id": parsed.note_id,

@@ -11,10 +11,11 @@ API 端点:
 import time
 import random
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from loguru import logger
 
+from collectors.base import now_bjt
 from collectors.spiders.base_spider import BaseSpider
 
 
@@ -212,7 +213,7 @@ class WeiboAPISpider:
             from datetime import datetime as dt
             collected = dt.strptime(created_at, "%a %b %d %H:%M:%S %z %Y")
         except Exception:
-            collected = datetime.utcnow()
+            collected = now_bjt()
 
         # 构建 source_url
         uid = str(user.get("id", ""))

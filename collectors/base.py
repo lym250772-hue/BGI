@@ -8,8 +8,15 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Iterator, Optional
+
+BJT = timezone(timedelta(hours=8))
+
+
+def now_bjt() -> datetime:
+    """返回北京时间（UTC+8），去除时区信息以兼容数据库。"""
+    return datetime.now(BJT).replace(tzinfo=None)
 
 
 @dataclass
@@ -34,7 +41,7 @@ class IntelItem:
     group_id: str = ""          # 贴吧名 / TG群组 / 关键词 等分组标识
 
     # ── 时间 ──
-    collected_at: datetime = field(default_factory=datetime.utcnow)
+    collected_at: datetime = field(default_factory=now_bjt)
 
     # ── 消息标识 ──
     message_id: Optional[int] = None    # 平台消息/帖子 ID
@@ -109,7 +116,7 @@ class IMMessageItem:
     content_type: str = "text"  # text / image / file / video
     message_id: str = ""        # 消息ID (msgSeq)
     reply_to_id: str = ""       # 回复消息ID
-    collected_at: datetime = field(default_factory=datetime.utcnow)
+    collected_at: datetime = field(default_factory=now_bjt)
     image_urls: list[str] = field(default_factory=list)
     images: list[dict] = field(default_factory=list)
     """图片/动图/表情包: [{"type": "image/mface/face", "url": "..."}]"""

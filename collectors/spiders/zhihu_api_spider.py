@@ -12,10 +12,11 @@
 import time
 import random
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from loguru import logger
 
+from collectors.base import now_bjt
 from collectors.spiders.base_spider import BaseSpider
 
 
@@ -256,7 +257,7 @@ class ZhihuAPISpider:
                 author_username=author.get("name", ""),
                 question_id=question_id,
                 answer_id=answer_id,
-                collected_at=datetime.utcnow(),
+                collected_at=now_bjt(),
                 keyword=keyword,
                 voteup_count=target.get("voteup_count", 0) or target.get("voteupCount", 0),
                 comment_count=target.get("comment_count", 0) or target.get("commentCount", 0),

@@ -5,10 +5,11 @@
 import time
 import re
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from loguru import logger
 
+from collectors.base import now_bjt
 from collectors.spiders.base_spider import BaseSpider
 
 
@@ -131,7 +132,7 @@ class TiebaSpider(BaseSpider):
 
                     all_items.append(card)
                     new_count += 1
-                    self._update_last_collected(keyword, card.collected_at or datetime.utcnow())
+                    self._update_last_collected(keyword, card.collected_at or now_bjt())
 
                     if max_items and len(all_items) >= max_items:
                         break
@@ -511,7 +512,7 @@ class TiebaSpider(BaseSpider):
 
     @staticmethod
     def _extract_time(html: str) -> datetime:
-        now = datetime.utcnow()
+        now = now_bjt()
         pub_m = re.search(r"发布于\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})", html)
         if pub_m:
             y, mo, d = map(int, pub_m.groups())
