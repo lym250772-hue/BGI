@@ -333,17 +333,25 @@ def show():
                         del st.session_state[k]
                 st.rerun()
 
+        # 对话框高度调节
+        _chat_height = st.select_slider(
+            "对话框高度", options=[0, 300, 450, 600, 800, 1000],
+            value=st.session_state.get("persona_chat_h", 0),
+            format_func=lambda h: "自动" if h == 0 else f"{h}px",
+            help="0=自动撑开随内容增长，其他=固定高度可滚动",
+        )
+        st.session_state["persona_chat_h"] = _chat_height
+
     # ═══════════ 右侧：对话展示 ═══════════
     with right:
         st.markdown("### 💬 对话记录")
 
-        # 运行中显示 spinner
         if st.session_state.persona_running:
             st.info("🔄 对话进行中...")
 
-        # 对话区域 — 加高
-        chat_h = 600
-        with st.container(height=chat_h):
+        # 对话区域 — 高度可调
+        _chat_h = st.session_state.get("persona_chat_h", 0)
+        with st.container(height=_chat_h if _chat_h > 0 else None):
             if not st.session_state.persona_msgs:
                 st.markdown(
                     f"""<div style='text-align:center;color:{T.MUTED};padding:120px 0 20px'>

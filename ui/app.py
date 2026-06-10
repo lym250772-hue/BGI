@@ -24,7 +24,7 @@ st.set_page_config(
 st.markdown(T.CSS, unsafe_allow_html=True)
 
 PAGES = {
-    "pipeline": ("🎯 情报工厂", pipeline.show),
+    "pipeline": ("🎯 灰黑产情报分析Agent", pipeline.show),
     "overview": ("总览 / ChatBI", overview.show),
     "persona": ("🎣 钓鱼模拟", persona.show),
     "collector": ("采集器管理", collector.show),
