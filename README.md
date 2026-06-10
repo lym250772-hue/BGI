@@ -38,7 +38,7 @@
 | 小红书 | 内容社区 | v3 持久化浏览器 + SSR 提取 | ~0.5条/s | ✅ |
 | 抖音 | 短视频 | X-Bogus 签名 + 浏览器内 fetch | ~0.5条/s | ✅ |
 | 闲鱼 | 二手交易 | v3 持久化浏览器 + DOM 解析 | ~0.3条/s | — |
-| QQ群 | 社交 IM | NapCatQQ WebSocket + HTTP 双模式 | 实时 | — |
+| QQ群 | 社交 IM | NapCatQQ WebSocket + HTTP 双模式 | 实时 + 历史增量拉取 | — |
 
 ### 统一数据格式
 
@@ -167,7 +167,7 @@ L4 LLM  → 复杂工具名/隐晦黑话/风险标签
 
 ### 技术方案
 
-FastAPI（RESTful API）+ Streamlit（8 页面仪表盘）+ MySQL（主库）+ Neo4j（图谱）+ Milvus（向量）+ Doris（OLAP），全部 Docker Compose 一键部署。
+FastAPI（RESTful API）+ Streamlit（8 页面仪表盘）+ MySQL（主库）+ Neo4j（图谱）+ Milvus（向量），全部 Docker Compose 一键部署。
 
 ### 前端页面（8 个）
 
@@ -228,7 +228,6 @@ FastAPI（RESTful API）+ Streamlit（8 页面仪表盘）+ MySQL（主库）+ N
 | MySQL | 主业务库 | ODS（原始）→ DWD（清洗+研判+实体）→ DIM（黑话词典）→ ADS（案件聚合），完整分层 |
 | Neo4j | 图谱扩线 | 实体节点 + 关系边，支撑团伙关联发现 |
 | Milvus | 向量检索 | 黑话词向量（变体发现）+ 情报文本向量（相似检索） |
-| Doris | OLAP | 研判宽表聚合，ChatBI 数据底座。不可用自动降级到 MySQL |
 
 ---
 
@@ -273,7 +272,7 @@ python main.py api     # → http://localhost:8000
 | 分类 | L1 规则 → L2 RoBERTa → L3 LLM (DeepSeek) |
 | 实体 | L1 正则 → L2 词典 → L3 Milvus 向量 (MiniLM) → L4 LLM |
 | LLM | DeepSeek API（兼容 OpenAI 接口，可替换为豆包等） |
-| 存储 | MySQL + Neo4j + Milvus + Doris |
+| 存储 | MySQL + Neo4j + Milvus |
 | 服务 | FastAPI + Streamlit |
 | 部署 | Docker Compose 一键启动全部基础设施 |
 
@@ -288,7 +287,7 @@ python main.py api     # → http://localhost:8000
 ├── persona/            AI 钓鱼人物引擎（YAML 配置 + 流式对话 + 安全护栏）
 ├── agents/             图谱扩线 + 报告摘要
 ├── bridges/            NapCatQQ 桥接（QQ 群采集）
-├── storage/            MySQL / Neo4j / Milvus / Doris 访问层
+├── storage/            MySQL / Neo4j / Milvus 访问层
 ├── api/                FastAPI RESTful 接口
 ├── ui/                 Streamlit 8 页面仪表盘
 │   └── views/
