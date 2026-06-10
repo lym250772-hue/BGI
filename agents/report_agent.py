@@ -10,7 +10,13 @@ Two modes:
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+_BJT = timezone(timedelta(hours=8))
+
+
+def _now_bjt() -> datetime:
+    return datetime.now(_BJT).replace(tzinfo=None)
 from loguru import logger
 
 from config.settings import settings
@@ -133,7 +139,7 @@ class ReportAgent:
         # --- Assemble ---
         report = {
             "report_type": "intel_analysis",
-            "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "generated_at": _now_bjt().strftime("%Y-%m-%dT%H:%M:%S"),
             "generated_by": "report_agent_rule",
             "title": f"风险研判报告 — {risk_label}",
             "conclusion": conclusion,
@@ -189,7 +195,7 @@ class ReportAgent:
                 max_tokens=1500)
             enhanced = json.loads(resp.choices[0].message.content)
             enhanced["generated_by"] = "report_agent_llm"
-            enhanced["generated_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            enhanced["generated_at"] = _now_bjt().strftime("%Y-%m-%dT%H:%M:%S")
             return enhanced
         except Exception as exc:
             logger.warning(f"LLM report enhancement failed, using rule-based: {exc}")
@@ -295,7 +301,7 @@ class ReportAgent:
                 for e in facts.get("entities", [])
             ),
             "source": "bgi_analysis",
-            "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "created_at": _now_bjt().strftime("%Y-%m-%dT%H:%M:%S"),
         }
 
 

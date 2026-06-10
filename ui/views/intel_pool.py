@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 import ui.labels as L
+import ui.theme as T
 from ui import data
 from ui.components import empty_panel, page_header
 
@@ -52,12 +53,11 @@ def _table(rows: list[dict]) -> pd.DataFrame:
 def _jobs_table(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame([
         {
-            "任务ID": j.get("job_id"),
             "情报ID": j.get("raw_id"),
+            "原始文本": (j.get("input_text") or "")[:100],
             "状态": L.job_status_label(j.get("status")),
             "进度": f"{j.get('progress') or 0}%",
             "当前步骤": L.job_step_label(j.get("current_step")),
-            "错误": (j.get("error_message") or "")[:80],
             "创建时间": str(j.get("created_at") or "")[:19],
         }
         for j in rows
@@ -73,7 +73,7 @@ def render_pool(include_header: bool = True):
             "查看已接收的结构化数据，并按状态批量提交后台研判。",
         )
     else:
-        st.markdown("### 清洗后情报池 / 智能初筛")
+        st.markdown("### 情报池")
 
     c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1.6, 0.8])
     with c1:
@@ -154,21 +154,21 @@ def render_pool(include_header: bool = True):
                         st.markdown(
                             f"""
                             <div style='margin-bottom:8px;padding:8px;border-radius:6px;
-                                        background:{'#162312' if d['status']=='CLEANED' else '#231616'};
-                                        border-left:3px solid {'#4CAF50' if d['status']=='CLEANED' else '#F44336'}'>
+                                        background:{'#F3FAF5' if d['status']=='CLEANED' else '#FDF4F4'};
+                                        border-left:3px solid {'#26735D' if d['status']=='CLEANED' else '#B83A3A'}'>
                               <div style='font-size:0.8rem;margin-bottom:4px'>
                                 {icon} <strong>#{d['id']}</strong> [{d['platform']}]{dup_mark}
-                                <span style='color:#92A1AF'> — {L.cleaning_status_label(d['status'])}</span>
-                                <span style='color:#92A1AF;float:right'>噪声分: {d['noise_score']:.2f}</span>
+                                <span style='color:{T.MUTED}'> — {L.cleaning_status_label(d['status'])}</span>
+                                <span style='color:{T.MUTED};float:right'>噪声分: {d['noise_score']:.2f}</span>
                               </div>
-                              <div style='font-size:0.7rem;color:#92A1AF;margin-bottom:4px'>
+                              <div style='font-size:0.7rem;color:{T.MUTED};margin-bottom:4px'>
                                 原因: {d.get('noise_reason') or '无'}
                               </div>
                               <div style='font-size:0.68rem;display:flex;gap:10px'>
-                                <span style='flex:1;color:#FF9800'>原始: {(d.get('original') or '')[:80]}{'...' if len(d.get('original') or '') > 80 else ''}</span>
+                                <span style='flex:1;color:{T.AMBER}'>原始: {(d.get('original') or '')[:80]}{'...' if len(d.get('original') or '') > 80 else ''}</span>
                               </div>
                               <div style='font-size:0.68rem;margin-top:2px'>
-                                <span style='flex:1;color:#4CAF50'>清洗: {(d.get('text') or '')[:80]}{'...' if len(d.get('text') or '') > 80 else ''}</span>
+                                <span style='flex:1;color:{T.GREEN}'>清洗: {(d.get('text') or '')[:80]}{'...' if len(d.get('text') or '') > 80 else ''}</span>
                               </div>
                             </div>
                             """,
@@ -183,6 +183,114 @@ def render_pool(include_header: bool = True):
                 del st.session_state["pool_clean_result"]
                 st.rerun()
 
+    # ── 待处理操作区：SCREENED 情报按初筛结论分组，一键执行 ──────
+    if screened:
+        st.markdown("---")
+        st.markdown("### 待处理操作区")
+
+        need_standard = [r for r in screened if r.get("screen_decision") == "NEED_STANDARD_ANALYSIS"]
+        need_graph = [r for r in screened if r.get("screen_decision") == "NEED_GRAPH_ANALYSIS"]
+        need_review = [r for r in screened if r.get("screen_decision") == "SCREENED_REVIEW"]
+        confirmed = [r for r in screened if r.get("screen_decision") == "CONFIRMED_RISK"]
+        low_risk = [r for r in screened if r.get("screen_decision") == "LOW_RISK_ARCHIVED"]
+
+        groups = []
+        if need_standard:
+            groups.append(("建议标准研判", need_standard, "standard", T.BLUE,
+                           "规则命中风险线索但证据不足，需要 LLM/NLP 协同深度研判。"))
+        if need_graph:
+            groups.append(("建议扩线研判", need_graph, "graph", T.PURPLE,
+                           "命中可扩线实体（账号/手机号/链接），建议启用向量检索与图谱扩展。"))
+        if need_review:
+            groups.append(("待人工复核", need_review, "review", T.AMBER,
+                           "初筛无法自动判定，需要人工查看原始内容后决定处理方式。"))
+        if confirmed:
+            groups.append(("已确认风险", confirmed, "confirmed", T.RED,
+                           "高置信规则命中，可视为已确认风险案件。"))
+        if low_risk:
+            groups.append(("低风险归档", low_risk, "archived", T.MUTED,
+                           "风险分低于阈值且无关键线索，已自动归档，无需操作。"))
+
+        if groups:
+            cols = st.columns(len(groups))
+            for col, (title, items, kind, color, desc) in zip(cols, groups):
+                with col:
+                    st.markdown(
+                        f"""
+                        <div class='bagi-panel-tight' style='text-align:center;margin-bottom:0.5rem'>
+                          <div style='font-size:0.72rem;font-weight:700;color:{color};margin-bottom:0.3rem;
+                                      text-transform:uppercase;letter-spacing:0.04em'>{title}</div>
+                          <div style='font-size:2rem;font-weight:800;color:{T.INK};line-height:1.1'>{len(items)}</div>
+                          <div class='section-note' style='margin-top:0.2rem'>{desc}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    if kind == "standard":
+                        if st.button(
+                            "提交标准研判",
+                            type="primary",
+                            key=f"pool_action_standard",
+                            use_container_width=True,
+                        ):
+                            job_ids = data.submit_batch_jobs(
+                                need_standard,
+                                options={
+                                    "enable_llm": True,
+                                    "enable_roberta": True,
+                                    "enable_embedding": False,
+                                    "enable_graph_expand": False,
+                                    "enable_report": False,
+                                    "analysis_mode": "情报池升级标准研判",
+                                    "auto_escalate": False,
+                                },
+                                max_items=len(need_standard),
+                            )
+                            st.success(f"已提交 {len(job_ids)} 条标准研判任务")
+                            st.rerun()
+
+                    elif kind == "graph":
+                        if st.button(
+                            "提交扩线研判",
+                            type="primary",
+                            key=f"pool_action_graph",
+                            use_container_width=True,
+                        ):
+                            job_ids = data.submit_batch_jobs(
+                                need_graph,
+                                options={
+                                    "enable_llm": True,
+                                    "enable_roberta": True,
+                                    "enable_embedding": True,
+                                    "enable_graph_expand": True,
+                                    "enable_report": False,
+                                    "analysis_mode": "情报池升级扩线研判",
+                                    "auto_escalate": False,
+                                },
+                                max_items=len(need_graph),
+                            )
+                            st.success(f"已提交 {len(job_ids)} 条扩线研判任务")
+                            st.rerun()
+
+                    elif kind == "review":
+                        if st.button(
+                            "前往研判工作台",
+                            type="secondary",
+                            key=f"pool_action_review",
+                            use_container_width=True,
+                        ):
+                            st.session_state.nav_page = "workbench"
+                            try:
+                                st.query_params["page"] = "workbench"
+                            except Exception:
+                                pass
+                            st.rerun()
+
+                    # confirmed and archived — no action needed
+                    if kind in ("confirmed", "archived"):
+                        st.caption("无需操作")
+
     # ── 批量处理按钮（仅已清洗数据可提交）──
     st.markdown("---")
     submit_disabled = not eligible
@@ -192,7 +300,7 @@ def render_pool(include_header: bool = True):
         disabled=submit_disabled,
         use_container_width=True,
         key="pool_submit_btn",
-        help="仅处理已清洗数据：先快速初筛；低风险或高置信命中直接完成，疑似新黑话、证据不足或可扩线线索会自动进入二轮研判。",
+        help="将已清洗数据送入智能分层管道：先快速初筛，根据结果自动归档或升级。完成后会出现在上方的待处理操作区。",
     ):
         job_ids = data.submit_batch_jobs(
             eligible,

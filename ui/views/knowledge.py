@@ -122,7 +122,7 @@ def show():
     page_header(
         "Knowledge Base",
         "知识库",
-        "实体线索、黑话词典与关系扩线集中管理；这里是研判结果沉淀后的资产层。")
+        "实体线索、黑话词典与关系扩线集中管理。")
     tab_entities, tab_slang, tab_graph = st.tabs(["实体线索", "黑话词典", "关系扩线"])
     with tab_entities:
         _entities_tab()

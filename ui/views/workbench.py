@@ -192,7 +192,7 @@ def _option_label(row: dict) -> str:
 def _render_result(raw_id: int):
     result = data.get_analysis_bundle(raw_id)
     if not result:
-        empty_panel("尚未完成研判", "提交后台任务后，任务完成会自动写回 MySQL、Neo4j 和 Milvus。")
+        empty_panel("尚未完成研判", "提交后台任务后，研判完成会自动展示结果。")
         return
 
     risk_label = result.get("risk_label") or "未分类"
@@ -209,6 +209,14 @@ def _render_result(raw_id: int):
     )
 
     _render_upgrade_hint(raw_id, result)
+
+    # 原始文本
+    raw = data.get_raw(raw_id) or {}
+    original_text = raw.get("content_raw") or ""
+    if original_text:
+        with st.expander("原始文本", expanded=False):
+            st.text_area("原始内容", original_text, height=120, key=f"orig_{raw_id}",
+                         label_visibility="collapsed")
 
     st.markdown("### 证据片段")
     evidence = result.get("evidence_spans") or []
@@ -231,7 +239,7 @@ def _render_result(raw_id: int):
                 unsafe_allow_html=True,
             )
     else:
-        st.info("暂无证据片段。可能是规则路径未产生证据，或样本风险较低。")
+        st.info("暂无证据片段。")
 
     st.markdown("### 历史相似情报")
     similar_rows = result.get("similar_intel") or []
@@ -261,7 +269,7 @@ def _render_result(raw_id: int):
         ])
         st.dataframe(df, hide_index=True, use_container_width=True)
     else:
-        st.info("暂无历史相似情报。快速筛查和标准研判默认不启用向量检索，扩线研判才会尝试召回历史相似样本。")
+        st.info("暂无历史相似情报。扩线研判模式下会自动召回相似样本。")
 
     left, right = st.columns([1.1, 1])
     with left:
@@ -313,12 +321,11 @@ def _jobs_table():
         return []
     df = pd.DataFrame([
         {
-            "任务ID": r.get("job_id"),
             "情报ID": r.get("raw_id"),
+            "原始文本": (r.get("input_text") or "")[:100],
             "状态": L.job_status_label(r.get("status")),
             "进度": f"{r.get('progress') or 0}%",
             "当前步骤": L.job_step_label(r.get("current_step")),
-            "错误": (r.get("error_message") or "")[:80],
             "创建时间": str(r.get("created_at") or "")[:19],
         }
         for r in rows
@@ -353,7 +360,7 @@ def _render_pending_result(raw_id: int, selected: dict):
     if error:
         st.error(error)
     else:
-        st.info("任务尚未完成。下方后台任务区会局部刷新，不会强制刷新整个页面。")
+        st.info("研判进行中，结果将在完成后自动显示。")
 
 
 def _active_result_id(current_raw_id: int) -> int:
@@ -469,9 +476,15 @@ def show():
     tab_result, tab_jobs = st.tabs(["研判结果", "后台任务"])
     with tab_result:
         active_raw_id = _active_result_id(raw_id)
-        _render_active_result(active_raw_id, selected if active_raw_id == raw_id else None)
+        _result_panel(active_raw_id, selected if active_raw_id == raw_id else None)
     with tab_jobs:
         _jobs_panel()
+
+
+@st.fragment(run_every="3s")
+def _result_panel(active_raw_id: int, selected: dict | None = None):
+    """Auto-refreshing fragment: polls MySQL so results appear as soon as the worker finishes."""
+    _render_active_result(active_raw_id, selected)
 
 
 @st.fragment(run_every="3s")

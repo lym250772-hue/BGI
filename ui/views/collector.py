@@ -16,7 +16,7 @@ import pandas as pd
 import streamlit as st
 
 from ui import data
-from ui.components import page_header, service_strip
+from ui.components import page_header
 
 # ── 平台配置 ────────────────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ def _intel_item_to_insert_dict(item, keywords: list[str], crawl_batch_id: str) -
         "author_id": str(getattr(item, "author_uid", "") or ""),
         "author_name": getattr(item, "author_username", "") or "",
         "publish_time": getattr(item, "collected_at", None),
-        "collect_time": datetime.now(),
+        "collect_time": datetime.now(BJT).replace(tzinfo=None),
         "content_type": getattr(item, "content_type", "text") or "text",
         "content_raw": getattr(item, "content_raw", "") or "",
         "media_urls": media_urls,
@@ -171,9 +171,6 @@ def show():
         "采集器管理",
         "管理7平台采集器：选择平台和关键词，一键触发采集，查看实时结果。",
     )
-
-    service_strip()
-    st.markdown("---")
 
     # ═════════════════════════════════════════════════════════════════════════
     # 平台总览卡片

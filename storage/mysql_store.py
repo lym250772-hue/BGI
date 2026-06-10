@@ -17,9 +17,16 @@ import pymysql
 import re
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from loguru import logger
 from config.settings import settings
+
+_BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def _now_beijing() -> datetime:
+    """Return current datetime in Beijing time (UTC+8), naive so MySQL stores it as-is."""
+    return datetime.now(_BEIJING_TZ).replace(tzinfo=None)
 
 
 RAW_STATUSES = {
@@ -65,8 +72,13 @@ class MySQLStore:
                 connect_timeout=15,
                 read_timeout=120,
                 write_timeout=60,
-                autocommit=False,
+                autocommit=True,
                 cursorclass=pymysql.cursors.DictCursor)
+            try:
+                with conn.cursor() as tc:
+                    tc.execute("SET time_zone = '+08:00'")
+            except Exception:
+                logger.warning("MySQL session timezone +08:00 failed, timestamps may be UTC")
             self._local.conn = conn
         return conn
 
@@ -597,7 +609,7 @@ class MySQLStore:
         updates = {
             "screen_decision": decision,
             "screen_reason": (reason or "")[:500],
-            "screened_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "screened_at": _now_beijing().strftime("%Y-%m-%d %H:%M:%S"),
         }
         if risk_score is not None:
             updates["screen_risk_score"] = float(risk_score)
@@ -613,7 +625,7 @@ class MySQLStore:
         """Mark analysis failure and keep a small audit note in metadata."""
         if not raw_id:
             return
-        failed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        failed_at = _now_beijing().strftime("%Y-%m-%d %H:%M:%S")
         error_text = (error_message or "")[:1000]
         with self.cursor() as c:
             c.execute(
@@ -1101,9 +1113,9 @@ class MySQLStore:
                        normalized_meaning=COALESCE(NULLIF(%s, ''), normalized_meaning),
                        risk_category=COALESCE(NULLIF(%s, ''), risk_category),
                        reviewed_by=%s,
-                       updated_at=NOW()
+                       updated_at=%s
                    WHERE term=%s""",
-                (meaning or "", category or "", reviewer, term))
+                (meaning or "", category or "", reviewer, _now_beijing(), term))
             return c.rowcount > 0
 
     def reject_slang_candidate(self, term: str, reviewer: str = "analyst",
@@ -1115,9 +1127,9 @@ class MySQLStore:
                    SET status='rejected',
                        reviewed_by=%s,
                        candidate_reason=COALESCE(NULLIF(%s, ''), candidate_reason),
-                       updated_at=NOW()
+                       updated_at=%s
                    WHERE term=%s AND status='candidate'""",
-                (reviewer, reason or "", term))
+                (reviewer, reason or "", _now_beijing(), term))
             return c.rowcount > 0
 
     # ==================================================================
@@ -1335,9 +1347,9 @@ class MySQLStore:
                        SET training_sample=%s,
                            summary='人工标注修正',
                            generated_by='hitl',
-                           created_at=NOW()
+                           created_at=%s
                        WHERE raw_id=%s AND report_type='training_sample'""",
-                    (sample, raw_id),
+                    (sample, _now_beijing(), raw_id),
                 )
                 if c.rowcount == 0:
                     c.execute(
@@ -1382,9 +1394,11 @@ class MySQLStore:
         if not sets:
             return
         if kwargs.get("status") == "running" and "started_at" not in kwargs:
-            sets.append("started_at=NOW()")
+            sets.append("started_at=%s")
+            params.append(_now_beijing())
         if kwargs.get("status") in ("success", "failed"):
-            sets.append("finished_at=NOW()")
+            sets.append("finished_at=%s")
+            params.append(_now_beijing())
         params.append(job_id)
         with self.cursor() as c:
             c.execute(f"UPDATE analysis_job SET {', '.join(sets)} WHERE job_id=%s", params)

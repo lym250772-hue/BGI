@@ -129,15 +129,13 @@ def overview_stats() -> dict:
                 """SELECT COUNT(*) AS cnt
                    FROM dwd_intel_analysis
                    WHERE is_latest=1
-                     AND DATE(DATE_ADD(created_at, INTERVAL 8 HOUR)) =
-                         DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR))"""
+                     AND DATE(created_at) = DATE(NOW())"""
             )
             today_analyzed = c.fetchone()["cnt"]
             c.execute(
                 """SELECT COUNT(*) AS cnt
                    FROM ods_raw_intel
-                   WHERE DATE(DATE_ADD(collect_time, INTERVAL 8 HOUR)) =
-                         DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR))"""
+                   WHERE DATE(collect_time) = DATE(NOW())"""
             )
             today_received = c.fetchone()["cnt"]
         return {
@@ -213,14 +211,13 @@ def daily_trend(days: int = 7) -> list[dict]:
         from storage.mysql_store import mysql
         with mysql.cursor() as c:
             c.execute(
-                """SELECT DATE(DATE_ADD(created_at, INTERVAL 8 HOUR)) AS dt,
+                """SELECT DATE(created_at) AS dt,
                           COUNT(*) AS cnt,
                           SUM(CASE WHEN risk_level IN ('high','critical') THEN 1 ELSE 0 END) AS high_cnt
                    FROM dwd_intel_analysis
                    WHERE is_latest=1
-                     AND DATE(DATE_ADD(created_at, INTERVAL 8 HOUR)) >=
-                         DATE_SUB(DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR)), INTERVAL %s DAY)
-                   GROUP BY DATE(DATE_ADD(created_at, INTERVAL 8 HOUR))
+                     AND DATE(created_at) >= DATE_SUB(DATE(NOW()), INTERVAL %s DAY)
+                   GROUP BY DATE(created_at)
                    ORDER BY dt""",
                 (days))
             return [dict(r) for r in c.fetchall()]
@@ -675,7 +672,7 @@ def list_intel(
                        JSON_UNQUOTE(JSON_EXTRACT(o.metadata, '$.screen_reason')) AS screen_reason,
                        a.risk_label, a.risk_sub_label, a.risk_score, a.risk_level,
                        a.classification_method,
-                       DATE_ADD(a.created_at, INTERVAL 8 HOUR) AS analyzed_at
+                       a.created_at AS analyzed_at
                 FROM ods_raw_intel o
                 LEFT JOIN dwd_intel_analysis a ON a.raw_id=o.id AND a.is_latest=1
                 {clause}

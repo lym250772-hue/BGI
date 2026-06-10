@@ -66,18 +66,20 @@ CSS = f"""
   --bagi-accent-dark: {ACCENT_DARK};
 }}
 
+/* ── Page background ───────────────────────────────────────────────────── */
+
 .stApp {{
-  background:
-    linear-gradient(90deg, rgba(24,32,42,0.025) 1px, transparent 1px) 0 0 / 28px 28px,
-    linear-gradient(0deg, rgba(24,32,42,0.018) 1px, transparent 1px) 0 0 / 28px 28px,
-    var(--bagi-bg);
+  background: var(--bagi-bg);
   color: var(--bagi-text);
 }}
 
 header[data-testid="stHeader"] {{
-  background: rgba(244,246,248,0.92) !important;
+  background: rgba(244,246,248,0.96) !important;
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--bagi-line);
 }}
+
+/* ── Hide Streamlit chrome ─────────────────────────────────────────────── */
 
 #MainMenu,
 footer,
@@ -111,34 +113,39 @@ button[aria-label="Close sidebar"] {{
   z-index: 9999 !important;
 }}
 
+/* ── Sidebar ───────────────────────────────────────────────────────────── */
+
 [data-testid="stSidebar"] {{
-  background: #121820;
-  border-right: 1px solid #25313E;
+  background: linear-gradient(180deg, #0F1923 0%, #131E2A 100%);
+  border-right: 1px solid #1D2A38;
 }}
 
 [data-testid="stSidebar"] * {{
-  color: #D7E0E8;
+  color: #C8D4E0;
 }}
 
 [data-testid="stSidebar"] .stRadio label {{
-  border-radius: 6px;
-  padding: 0.52rem 0.72rem;
-  color: #B9C4CE !important;
+  border-radius: 8px;
+  padding: 0.56rem 0.8rem;
+  color: #8899AE !important;
   font-size: 0.88rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
 }}
 
 [data-testid="stSidebar"] .stRadio label:hover {{
-  background: #1B2530;
-  color: #FFFFFF !important;
+  background: rgba(23,107,135,0.09);
+  color: #DFE8F2 !important;
 }}
 
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {{
-  background: #E6EEF4 !important;
-  border: 1px solid #B9CAD8;
+  background: #FFFFFF !important;
+  border: 1px solid #C4D2E0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }}
 
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) * {{
-  color: #111820 !important;
+  color: #0F1923 !important;
   font-weight: 650 !important;
 }}
 
@@ -154,10 +161,14 @@ button[aria-label="Close sidebar"] {{
   pointer-events: none;
 }}
 
+/* ── Main content area ─────────────────────────────────────────────────── */
+
 .block-container {{
   padding-top: 1.2rem !important;
-  max-width: 1500px;
+  max-width: 1520px;
 }}
+
+/* ── Typography ────────────────────────────────────────────────────────── */
 
 h1, h2, h3, h4, p, div, span, label {{
   letter-spacing: 0 !important;
@@ -167,7 +178,7 @@ h1 {{
   font-size: 1.55rem !important;
   font-weight: 760 !important;
   color: var(--bagi-ink) !important;
-  margin-bottom: 0.2rem !important;
+  margin-bottom: 0.15rem !important;
 }}
 
 h2 {{
@@ -185,30 +196,35 @@ h3 {{
 .page-kicker {{
   display: inline-flex;
   align-items: center;
-  height: 24px;
-  padding: 0 9px;
-  border: 1px solid var(--bagi-line);
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(23,107,135,0.22);
   border-radius: 999px;
-  background: rgba(255,255,255,0.72);
-  color: var(--bagi-muted);
-  font-size: 0.72rem;
+  background: rgba(23,107,135,0.06);
+  color: {ACCENT};
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 0.7rem;
   font-weight: 700;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }}
+
+/* ── Panels & cards ────────────────────────────────────────────────────── */
 
 .bagi-panel {{
   background: var(--bagi-panel);
   border: 1px solid var(--bagi-line);
-  border-radius: 8px;
-  padding: 1rem;
-  box-shadow: 0 8px 28px rgba(24,32,42,0.045);
+  border-radius: 10px;
+  padding: 1.1rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.03);
 }}
 
 .bagi-panel-tight {{
   background: var(--bagi-panel);
   border: 1px solid var(--bagi-line);
-  border-radius: 8px;
-  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  padding: 0.78rem 0.9rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }}
 
 .section-title {{
@@ -224,103 +240,157 @@ h3 {{
   line-height: 1.55;
 }}
 
+/* ── Badges ────────────────────────────────────────────────────────────── */
+
 .bagi-badge {{
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 2px 8px;
-  border: 1px solid color-mix(in srgb, var(--badge-color), white 62%);
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid color-mix(in srgb, var(--badge-color), white 58%);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--badge-color), white 88%);
+  background: color-mix(in srgb, var(--badge-color), white 86%);
   color: var(--badge-color);
   font-size: 0.72rem;
   font-weight: 720;
   white-space: nowrap;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.5);
 }}
 
 .status-pill {{
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-height: 24px;
-  padding: 2px 9px;
+  gap: 8px;
+  min-height: 26px;
+  padding: 2px 12px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--status-color), white 90%);
+  background: color-mix(in srgb, var(--status-color), white 88%);
+  border: 1px solid color-mix(in srgb, var(--status-color), white 68%);
   color: var(--status-color);
   font-size: 0.75rem;
   font-weight: 760;
 }}
 
 .status-pill span {{
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
   background: var(--status-color);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-color), white 78%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-color), white 74%);
 }}
 
+/* ── Intel card ────────────────────────────────────────────────────────── */
+
 .intel-card {{
-  border-left: 3px solid var(--bagi-accent);
-  padding: 0.72rem 0.82rem;
-  background: #FFFFFF;
-  border-radius: 0 8px 8px 0;
+  border-left: 4px solid var(--bagi-accent);
+  padding: 0.78rem 0.9rem;
+  background: var(--bagi-panel);
+  border-radius: 0 10px 10px 0;
   border-top: 1px solid var(--bagi-line);
   border-right: 1px solid var(--bagi-line);
   border-bottom: 1px solid var(--bagi-line);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.035);
 }}
 
+/* ── Monospace ─────────────────────────────────────────────────────────── */
+
 .mono {{
-  font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
 }}
+
+/* ── Metrics ───────────────────────────────────────────────────────────── */
 
 [data-testid="stMetric"] {{
   background: var(--bagi-panel);
   border: 1px solid var(--bagi-line);
-  border-radius: 8px;
-  padding: 0.78rem 0.9rem;
+  border-radius: 10px;
+  padding: 0.85rem 0.95rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}}
+
+[data-testid="stMetric"]:hover {{
+  border-color: rgba(23,107,135,0.2);
+  box-shadow: 0 2px 8px rgba(23,107,135,0.06);
 }}
 
 [data-testid="stMetric"] label {{
   color: var(--bagi-muted) !important;
-  font-size: 0.72rem !important;
-  font-weight: 720;
+  font-size: 0.7rem !important;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }}
 
 [data-testid="stMetricValue"] {{
   color: var(--bagi-ink) !important;
-  font-size: 1.45rem !important;
-  font-weight: 780 !important;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 1.55rem !important;
+  font-weight: 700 !important;
 }}
 
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+
 .stButton > button {{
-  border-radius: 6px !important;
+  border-radius: 8px !important;
   border: 1px solid var(--bagi-accent) !important;
   background: var(--bagi-accent) !important;
-  color: white !important;
-  min-height: 36px;
-  font-weight: 720 !important;
+  color: #FFFFFF !important;
+  min-height: 38px;
+  font-weight: 700 !important;
+  font-size: 0.85rem;
+  transition: all 0.18s ease;
+  box-shadow: 0 1px 2px rgba(23,107,135,0.18);
 }}
 
 .stButton > button:hover {{
-  background: var(--bagi-accent-dark) !important;
-  border-color: var(--bagi-accent-dark) !important;
+  background: {ACCENT_DARK} !important;
+  border-color: {ACCENT_DARK} !important;
+  box-shadow: 0 4px 14px rgba(23,107,135,0.22);
 }}
 
 .stButton > button[kind="secondary"] {{
-  background: #FFFFFF !important;
+  background: var(--bagi-panel) !important;
   color: var(--bagi-text) !important;
+  border-color: var(--bagi-line) !important;
+  box-shadow: none;
+}}
+
+.stButton > button[kind="secondary"]:hover {{
+  background: {SOFT} !important;
+  border-color: #C0CDD8 !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}}
+
+.stButton > button:disabled {{
+  opacity: 0.45;
+  box-shadow: none;
+}}
+
+/* ── Inputs ────────────────────────────────────────────────────────────── */
+
+.stTextInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] {{
+  border-radius: 8px !important;
   border-color: var(--bagi-line) !important;
 }}
 
-.stTextInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] {{
-  border-radius: 6px !important;
+.stTextInput input:focus,
+.stTextArea textarea:focus {{
+  border-color: var(--bagi-accent) !important;
+  box-shadow: 0 0 0 3px rgba(23,107,135,0.1) !important;
 }}
+
+/* ── DataFrames ────────────────────────────────────────────────────────── */
 
 [data-testid="stDataFrame"] {{
   border: 1px solid var(--bagi-line);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
 }}
+
+/* ── Tabs ──────────────────────────────────────────────────────────────── */
 
 .stTabs [data-baseweb="tab-list"] {{
   gap: 4px;
@@ -328,21 +398,42 @@ h3 {{
 }}
 
 .stTabs [data-baseweb="tab"] {{
-  border-radius: 6px 6px 0 0;
+  border-radius: 8px 8px 0 0;
   color: var(--bagi-muted);
-  font-weight: 720;
+  font-weight: 700;
+  font-size: 0.85rem;
 }}
 
 .stTabs [aria-selected="true"] {{
-  background: white;
-  color: var(--bagi-ink) !important;
+  background: var(--bagi-panel);
+  color: var(--bagi-accent) !important;
 }}
 
-/*
-  Streamlit 的侧边栏展开按钮挂在顶部工具栏附近。
-  不能隐藏整个 stToolbar，否则侧边栏收起后就没有入口再展开。
-  这里只隐藏部署入口，保留侧边栏折叠/展开控件。
-*/
+/* ── Expander ──────────────────────────────────────────────────────────── */
+
+[data-testid="stExpander"] {{
+  border: 1px solid var(--bagi-line) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+}}
+
+/* ── Dividers ──────────────────────────────────────────────────────────── */
+
+hr {{
+  border-color: var(--bagi-line) !important;
+  margin: 1.2rem 0 !important;
+}}
+
+/* ── Number input ──────────────────────────────────────────────────────── */
+
+[data-testid="stNumberInput"] button {{
+  border-color: var(--bagi-line) !important;
+  color: var(--bagi-text) !important;
+  border-radius: 6px !important;
+}}
+
+/* ── Deploy button (hide) ──────────────────────────────────────────────── */
+
 div[data-testid="stAppDeployButton"],
 div[data-testid="stAppDeployButton"] * {{
   display: none !important;

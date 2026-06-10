@@ -11,7 +11,7 @@ import streamlit as st
 
 import ui.labels as L
 from ui import data
-from ui.components import page_header, service_strip
+from ui.components import page_header
 
 # ── 会话状态初始化 ────────────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ def _run_cleaning_on_selected(selected_ids: list[int]) -> dict:
                 risk_score=float(result.get("noise_score") or 0),
             )
             discarded += 1
-        elif status in ("MEDIA_ONLY", "SIMILAR", "CLEANED"):
+        else:
             mysql.update_raw_status(
                 item["id"], "CLEANED",
                 clean_text=result["text"],
@@ -214,13 +214,11 @@ def _show_cleaning_preview(raw_id: int):
 def show():
     _init_session()
     page_header("Cleaning", "数据清洗", "v2.0 作者感知去重 · 内容角色五分类 · MEDIA_ONLY 保护")
-    service_strip(compact=True)
 
-    # ── 清洗主流程：待清洗 → 预览 → 情报池/初筛 → 统计 ────────────────
-    tab1, tab2, tab_pool, tab3 = st.tabs([
+    # ── 清洗主流程：待清洗 → 预览 → 统计 ────────────────
+    tab1, tab2, tab3 = st.tabs([
         "待清洗队列",
         "清洗预览",
-        "情报池 / 智能初筛",
         "清洗统计",
     ])
 
@@ -300,7 +298,7 @@ def show():
 
             st.caption(f"共 {len(rows)} 条待清洗数据，已选中 {len(selected)} 条")
         else:
-            st.info("没有待清洗的数据。请先在采集器管理页面采集数据，或导入示例数据。")
+            st.info("没有待清洗的数据。请先在采集器管理页面采集数据。")
 
         # ── 一键清洗按钮 ──
         if do_clean_all:
@@ -390,12 +388,7 @@ def show():
         if st.session_state.cleaning_preview_id:
             _show_cleaning_preview(st.session_state.cleaning_preview_id)
 
-    # ── Tab 3: 情报池 / 智能初筛 ────────────────────────────────────────
-    with tab_pool:
-        from ui.views import intel_pool
-        intel_pool.render_pool(include_header=False)
-
-    # ── Tab 4: 操作日志 / 统计 ────────────────────────────────────────────
+    # ── Tab 3: 操作日志 / 统计 ────────────────────────────────────────────
     with tab3:
         st.markdown("### 清洗统计")
 
@@ -423,7 +416,7 @@ def show():
             with col_b:
                 st.bar_chart(status_df.set_index("状态"), use_container_width=True, height=300)
         else:
-            st.info("暂无数据。请先导入示例数据或执行采集。")
+            st.info("暂无数据。")
 
         st.divider()
         st.markdown("### 清洗管道说明")
