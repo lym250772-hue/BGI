@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import streamlit as st
 
@@ -7,16 +9,16 @@ import ui.labels as L
 import ui.theme as T
 from ui import data
 from ui.components import (
-    auto_refresh,
     empty_panel,
+    intel_status_badge,
     page_header,
-    raw_status_badge,
     risk_badge,
 )
 
 
 STATUS_OPTIONS = {
     "已清洗待研判": "CLEANED",
+    "待人工复核/待升级": "SCREENED",
     "研判失败": "FAILED",
     "已研判": "ANALYZED",
     "全部": None,
@@ -31,6 +33,20 @@ MODE_OPTIONS = {
             "enable_embedding": False,
             "enable_graph_expand": False,
             "enable_report": False,
+        },
+    },
+    "智能分层处理（推荐）": {
+        "desc": "先快速初筛；低风险自动归档，命中关键线索时自动追加标准研判或扩线研判。",
+        "options": {
+            "enable_llm": False,
+            "enable_roberta": False,
+            "enable_embedding": False,
+            "enable_graph_expand": False,
+            "enable_report": False,
+            "auto_escalate": True,
+            "low_risk_threshold": 0.2,
+            "standard_threshold": 0.45,
+            "graph_threshold": 0.55,
         },
     },
     "标准研判": {
@@ -55,6 +71,105 @@ MODE_OPTIONS = {
     },
 }
 
+MODE_ORDER = ["智能分层处理（推荐）", "快速筛查", "标准研判", "扩线研判"]
+
+
+def _metadata(raw: dict | None) -> dict:
+    value = (raw or {}).get("metadata")
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return json.loads(value)
+        except Exception:
+            return {}
+    return {}
+
+
+def _upgrade_options(kind: str) -> dict:
+    if kind == "graph":
+        return {
+            "enable_llm": True,
+            "enable_roberta": True,
+            "enable_embedding": True,
+            "enable_graph_expand": True,
+            "enable_report": False,
+            "analysis_mode": "人工升级扩线研判",
+            "auto_escalate": False,
+        }
+    return {
+        "enable_llm": True,
+        "enable_roberta": True,
+        "enable_embedding": False,
+        "enable_graph_expand": False,
+        "enable_report": False,
+        "analysis_mode": "人工升级标准研判",
+        "auto_escalate": False,
+    }
+
+
+def _render_upgrade_hint(raw_id: int, result: dict):
+    raw = data.get_raw(raw_id) or {}
+    if raw.get("raw_status") != "SCREENED":
+        return
+
+    latest = data.latest_job_for_raw(raw_id)
+    if latest.get("status") in ("pending", "running"):
+        st.info("该情报已有后台升级任务正在执行。")
+        return
+
+    meta = _metadata(raw)
+    decision = meta.get("screen_decision") or result.get("screen_decision") or "SCREENED_REVIEW"
+    reason = meta.get("screen_reason") or "初筛已完成，可按需升级。"
+
+    title_map = {
+        "LOW_RISK_ARCHIVED": "低风险归档",
+        "NEED_STANDARD_ANALYSIS": "建议进入标准研判",
+        "NEED_GRAPH_ANALYSIS": "建议进入扩线研判",
+        "SCREENED_REVIEW": "建议人工复核",
+    }
+    st.markdown("### 初筛升级建议")
+    st.markdown(
+        f"""
+        <div class='bagi-panel-tight' style='margin-bottom:0.7rem'>
+          <div class='section-title'>{title_map.get(decision, L.screen_decision_label(decision))}</div>
+          <div class='section-note'>{reason}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_a, col_b, col_c = st.columns([1, 1, 2])
+    with col_a:
+        if st.button("标准研判", key=f"upgrade_standard_{raw_id}", use_container_width=True):
+            text = data.preferred_text(raw_id, fallback=raw.get("content_raw") or "")
+            job_id = data.submit_analysis_job(
+                raw_id=raw_id,
+                text=text,
+                platform=raw.get("source_platform") or "unknown",
+                options=_upgrade_options("standard"),
+            )
+            st.session_state.wb_active_raw_id = raw_id
+            st.success(f"已提交标准研判任务：{job_id}")
+            st.rerun()
+    with col_b:
+        if st.button("扩线研判", key=f"upgrade_graph_{raw_id}", use_container_width=True):
+            text = data.preferred_text(raw_id, fallback=raw.get("content_raw") or "")
+            job_id = data.submit_analysis_job(
+                raw_id=raw_id,
+                text=text,
+                platform=raw.get("source_platform") or "unknown",
+                options=_upgrade_options("graph"),
+            )
+            st.session_state.wb_active_raw_id = raw_id
+            st.success(f"已提交扩线研判任务：{job_id}")
+            st.rerun()
+    with col_c:
+        if decision == "LOW_RISK_ARCHIVED":
+            st.caption("低风险样本不会删除，仍可人工升级。")
+        else:
+            st.caption("升级任务完成后会把该情报从“待复核/待升级”推进到“已研判”。")
+
 
 def _query_int(name: str) -> int | None:
     try:
@@ -70,7 +185,7 @@ def _option_label(row: dict) -> str:
     author = row.get("author_name") or "-"
     return (
         f"#{row['id']} [{row.get('source_platform') or '-'}] @{author} "
-        f"{L.raw_status_label(row.get('raw_status'))} | {row.get('content_preview') or ''}"
+        f"{L.intel_status_label(row.get('raw_status'), row.get('screen_decision'))} | {row.get('content_preview') or ''}"
     )
 
 
@@ -92,6 +207,8 @@ def _render_result(raw_id: int):
         f"<div style='padding-top:1.2rem'>{risk_badge(result.get('risk_level'))}</div>",
         unsafe_allow_html=True,
     )
+
+    _render_upgrade_hint(raw_id, result)
 
     st.markdown("### 证据片段")
     evidence = result.get("evidence_spans") or []
@@ -200,7 +317,7 @@ def _jobs_table():
             "情报ID": r.get("raw_id"),
             "状态": L.job_status_label(r.get("status")),
             "进度": f"{r.get('progress') or 0}%",
-            "当前步骤": r.get("current_step") or "-",
+            "当前步骤": L.job_step_label(r.get("current_step")),
             "错误": (r.get("error_message") or "")[:80],
             "创建时间": str(r.get("created_at") or "")[:19],
         }
@@ -216,7 +333,7 @@ def _render_pending_result(raw_id: int, selected: dict):
     if latest:
         status = L.job_status_label(latest.get("status"))
     progress = latest.get("progress") if latest else 0
-    step = latest.get("current_step") or "-"
+    step = L.job_step_label(latest.get("current_step"))
     error = latest.get("error_message") or ""
 
     st.markdown("### 当前研判状态")
@@ -236,7 +353,7 @@ def _render_pending_result(raw_id: int, selected: dict):
     if error:
         st.error(error)
     else:
-        st.info("任务尚未完成。页面会在后台任务执行期间自动刷新。")
+        st.info("任务尚未完成。下方后台任务区会局部刷新，不会强制刷新整个页面。")
 
 
 def _active_result_id(current_raw_id: int) -> int:
@@ -250,7 +367,7 @@ def _active_result_id(current_raw_id: int) -> int:
 def _should_render_result(raw_id: int, raw_status: str, latest_job: dict) -> bool:
     if latest_job.get("status") == "success":
         return True
-    return raw_status in ("ANALYZED",)
+    return raw_status in ("ANALYZED", "SCREENED")
 
 
 def _render_active_result(active_raw_id: int, selected: dict | None = None):
@@ -287,7 +404,7 @@ def show():
     with q1:
         status_label = st.selectbox("队列", list(STATUS_OPTIONS.keys()), key="wb_status")
     with q2:
-        mode_label = st.selectbox("研判模式", list(MODE_OPTIONS.keys()), key="wb_mode")
+        mode_label = st.selectbox("研判模式", MODE_ORDER, key="wb_mode")
     with q3:
         keyword = st.text_input("搜索", placeholder="内容、作者、频道关键词", key="wb_keyword")
 
@@ -303,9 +420,7 @@ def show():
             st.markdown("### 当前提交")
             _render_active_result(int(active_raw_id))
         st.markdown("### 后台任务")
-        job_rows = _jobs_table()
-        if any(j.get("status") in ("pending", "running") for j in job_rows):
-            auto_refresh(interval_ms=2500)
+        _jobs_panel()
         return
 
     options = {_option_label(r): r["id"] for r in rows}
@@ -319,7 +434,7 @@ def show():
             f"""
             <div class='intel-card'>
               <div style='display:flex;gap:8px;align-items:center;margin-bottom:8px'>
-                {raw_status_badge(selected.get('raw_status'))}
+                {intel_status_badge(selected.get('raw_status'), selected.get('screen_decision'))}
                 <span class='mono' style='color:{T.MUTED}'>#{raw_id}</span>
                 <span style='color:{T.MUTED}'>{selected.get('source_platform') or '-'}</span>
                 <span style='color:{T.MUTED}'>@{selected.get('author_name') or '-'}</span>
@@ -356,7 +471,9 @@ def show():
         active_raw_id = _active_result_id(raw_id)
         _render_active_result(active_raw_id, selected if active_raw_id == raw_id else None)
     with tab_jobs:
-        _jobs_table()
+        _jobs_panel()
 
-    if data.has_active_jobs():
-        auto_refresh(interval_ms=2500)
+
+@st.fragment(run_every="3s")
+def _jobs_panel():
+    _jobs_table()

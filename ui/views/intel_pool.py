@@ -5,15 +5,24 @@ import streamlit as st
 
 import ui.labels as L
 from ui import data
-from ui.components import auto_refresh, empty_panel, page_header
+from ui.components import empty_panel, page_header
 
 
 STATUS_OPTIONS = {
     "全部": None,
     "已清洗待研判": "CLEANED",
+    "待复核/待升级": "SCREENED",
     "已研判": "ANALYZED",
     "研判失败": "FAILED",
     "已丢弃": "DISCARDED",
+}
+
+DECISION_OPTIONS = {
+    "全部": None,
+    "低风险归档": "LOW_RISK_ARCHIVED",
+    "建议标准研判": "NEED_STANDARD_ANALYSIS",
+    "建议扩线研判": "NEED_GRAPH_ANALYSIS",
+    "待人工复核": "SCREENED_REVIEW",
 }
 
 
@@ -25,13 +34,14 @@ def _table(rows: list[dict]) -> pd.DataFrame:
             "频道": r.get("source_channel") or "-",
             "作者": r.get("author_name") or "-",
             "内容摘要": r.get("content_preview") or "",
-            "处理状态": L.raw_status_label(r.get("raw_status")),
+            "处理状态": L.intel_status_label(r.get("raw_status"), r.get("screen_decision")),
             "风险": (r.get("risk_label") or "未分类")
             + (f" / {r.get('risk_sub_label')}" if r.get("risk_sub_label") else ""),
             "风险分": (
                 f"{float(r.get('risk_score') or 0):.2f}"
                 if r.get("risk_score") is not None else "-"
             ),
+            "初筛结论": L.screen_decision_label(r.get("screen_decision") or ""),
             "判定方式": L.classification_method_label(r.get("classification_method") or ""),
             "接收时间": str(r.get("collect_time") or "")[:19],
         }
@@ -46,7 +56,7 @@ def _jobs_table(rows: list[dict]) -> pd.DataFrame:
             "情报ID": j.get("raw_id"),
             "状态": L.job_status_label(j.get("status")),
             "进度": f"{j.get('progress') or 0}%",
-            "当前步骤": j.get("current_step") or "-",
+            "当前步骤": L.job_step_label(j.get("current_step")),
             "错误": (j.get("error_message") or "")[:80],
             "创建时间": str(j.get("created_at") or "")[:19],
         }
@@ -63,30 +73,50 @@ def render_pool(include_header: bool = True):
             "查看已接收的结构化数据，并按状态批量提交后台研判。",
         )
     else:
-        st.markdown("### 情报池 / 批量处理")
+        st.markdown("### 清洗后情报池 / 智能初筛")
 
-    c1, c2, c3, c4 = st.columns([1, 1, 1.7, 0.8])
+    c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1.6, 0.8])
     with c1:
         status_label = st.selectbox("处理状态", list(STATUS_OPTIONS.keys()), key="pool_status")
     with c2:
-        limit = st.number_input("读取数量", min_value=20, max_value=1000, value=300, step=20)
+        decision_label = st.selectbox("初筛结论", list(DECISION_OPTIONS.keys()), key="pool_decision")
     with c3:
-        keyword = st.text_input("搜索", placeholder="内容、作者或频道", key="pool_keyword")
+        limit = st.number_input("读取数量", min_value=20, max_value=1000, value=300, step=20)
     with c4:
+        keyword = st.text_input("搜索", placeholder="内容、作者或频道", key="pool_keyword")
+    with c5:
         batch_size = st.number_input("批量数", min_value=1, max_value=50, value=10, step=1)
 
-    rows = data.list_intel(status=STATUS_OPTIONS[status_label], keyword=keyword, limit=int(limit))
-    eligible = [r for r in rows if r.get("raw_status") in ("RAW_COLLECTED", "CLEANED", "FAILED")]
+    rows = data.list_intel(
+        status=STATUS_OPTIONS[status_label],
+        keyword=keyword,
+        limit=int(limit),
+        screen_decision=DECISION_OPTIONS[decision_label],
+    )
+    eligible = [r for r in rows if r.get("raw_status") == "CLEANED"]
     pending_clean = [r for r in rows if r.get("raw_status") == "RAW_COLLECTED"]
     cleaned_ready = [r for r in rows if r.get("raw_status") == "CLEANED"]
+    screened = [r for r in rows if r.get("raw_status") == "SCREENED"]
+    review_ready = [
+        r for r in rows
+        if r.get("raw_status") == "SCREENED"
+        and r.get("screen_decision") == "SCREENED_REVIEW"
+    ]
 
     # ── 统计指标 ──
-    b1, b2, b3, b4 = st.columns([1, 1, 1, 1])
+    b1, b2, b3, b4, b5 = st.columns([1, 1, 1, 1, 1])
     b1.metric("当前结果", len(rows))
     b2.metric("待清洗", len(pending_clean),
               delta=None if not pending_clean else f"{len(pending_clean)}条需处理")
-    b3.metric("已清洗", len(cleaned_ready))
-    b4.metric("可研判", len(eligible))
+    b3.metric("待初筛", len(cleaned_ready))
+    b4.metric("待复核/升级", len(screened))
+    b5.metric("待人工复核", len(review_ready))
+
+    if review_ready:
+        st.info(
+            f"当前筛选结果中有 {len(review_ready)} 条需要人工复核。"
+            "可在“初筛结论”中选择“待人工复核”查看。"
+        )
 
     # ── 一键清洗按钮 ──
     if pending_clean:
@@ -128,7 +158,7 @@ def render_pool(include_header: bool = True):
                                         border-left:3px solid {'#4CAF50' if d['status']=='CLEANED' else '#F44336'}'>
                               <div style='font-size:0.8rem;margin-bottom:4px'>
                                 {icon} <strong>#{d['id']}</strong> [{d['platform']}]{dup_mark}
-                                <span style='color:#92A1AF'> — {d['status']}</span>
+                                <span style='color:#92A1AF'> — {L.cleaning_status_label(d['status'])}</span>
                                 <span style='color:#92A1AF;float:right'>噪声分: {d['noise_score']:.2f}</span>
                               </div>
                               <div style='font-size:0.7rem;color:#92A1AF;margin-bottom:4px'>
@@ -153,37 +183,37 @@ def render_pool(include_header: bool = True):
                 del st.session_state["pool_clean_result"]
                 st.rerun()
 
-    # ── 提交研判按钮（仅已清洗数据可提交）──
+    # ── 批量处理按钮（仅已清洗数据可提交）──
     st.markdown("---")
     submit_disabled = not eligible
     if st.button(
-        "提交已清洗数据到智能分层研判",
+        "批量处理",
         type="primary" if cleaned_ready else "secondary",
         disabled=submit_disabled,
         use_container_width=True,
         key="pool_submit_btn",
-        help="将 CLEANED 状态的数据提交后台研判",
+        help="仅处理已清洗数据：先快速初筛；低风险或高置信命中直接完成，疑似新黑话、证据不足或可扩线线索会自动进入二轮研判。",
     ):
-        # 优先提交已清洗的，其次提交其他可研判的
-        to_submit = cleaned_ready or eligible
         job_ids = data.submit_batch_jobs(
-            to_submit,
+            eligible,
             options={
                 "enable_llm": False,
                 "enable_roberta": False,
                 "enable_embedding": False,
                 "enable_graph_expand": False,
                 "enable_report": False,
-                "analysis_mode": "批量智能初筛",
+                "analysis_mode": "批量分层处理",
                 "auto_escalate": True,
+                "low_risk_threshold": 0.2,
                 "standard_threshold": 0.45,
                 "graph_threshold": 0.55,
+                "confirm_threshold": 0.72,
             },
             max_items=int(batch_size),
         )
         st.session_state.pool_last_jobs = job_ids
         st.success(
-            f"已提交 {len(job_ids)} 个初筛任务；命中条件的样本会自动追加标准研判或扩线研判。"
+            f"已提交 {len(job_ids)} 条已清洗情报进入批量处理；系统会先初筛，再按条件自动结束、标准研判或扩线研判。"
         )
         st.rerun()
 
@@ -201,16 +231,18 @@ def render_pool(include_header: bool = True):
             },
         )
 
+    _jobs_panel()
+
+
+def show():
+    render_pool(include_header=True)
+
+
+@st.fragment(run_every="3s")
+def _jobs_panel():
     st.markdown("### 后台任务")
     jobs = data.list_jobs(limit=12)
     if jobs:
         st.dataframe(_jobs_table(jobs), hide_index=True, use_container_width=True)
     else:
         st.info("暂无后台任务。")
-
-    if data.has_active_jobs():
-        auto_refresh(interval_ms=2500)
-
-
-def show():
-    render_pool(include_header=True)

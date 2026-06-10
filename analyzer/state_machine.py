@@ -1125,6 +1125,8 @@ class AnalysisAgent:
             "risk_sub_label": state["risk_sub_label"],
             "risk_score": state["risk_score"],
             "risk_level": state["risk_level"],
+            "classification_confidence": state.get("classification_confidence", 0.0),
+            "classification_method": state.get("classification_method", ""),
             "evidence_spans": state["evidence_spans"],
             "entities": state["entities"],
             "slang_terms": state["slang_terms"],

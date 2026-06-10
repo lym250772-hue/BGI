@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import sys
 import threading
 import time
 from datetime import datetime, timezone, timedelta
+from uuid import uuid4
 
 BJT = timezone(timedelta(hours=8))
 from pathlib import Path
@@ -39,6 +41,8 @@ def _do_collect(platform: str, keywords: list[str], max_pages: int, fetch_replie
 
     logs: list[str] = []
     results: list[dict] = []
+    crawl_batch_id = f"ui_{platform}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:6]}"
+    inserted_count = 0
 
     kwargs = {"keywords": keywords, "max_pages_per_keyword": max_pages}
     if platform in ("tieba",):
@@ -52,24 +56,25 @@ def _do_collect(platform: str, keywords: list[str], max_pages: int, fetch_replie
         for item in collector.collect():
             # 写入 MySQL；失败必须暴露在日志里，否则前端看得到采集结果，
             # 但情报池查不到入库数据，会造成“数据消失”的错觉。
+            raw_id = None
             try:
-                mysql.insert_raw({
-                    "source_platform": item.platform,
-                    "source_url": item.source_url,
-                    "author_id": item.author_uid,
-                    "author_name": item.author_username,
-                    "content_type": item.content_type,
-                    "content_raw": item.content_raw,
-                    "raw_status": "RAW_COLLECTED",
-                    "collect_time": item.collected_at,
-                })
+                raw_id = mysql.insert_raw(
+                    _intel_item_to_insert_dict(
+                        item,
+                        keywords=keywords,
+                        crawl_batch_id=crawl_batch_id,
+                    )
+                )
+                inserted_count += 1
             except Exception as exc:
                 logs.append(
                     f"[WARN] 入库失败：{(item.content_raw or '')[:40]}... · {exc}"
                 )
 
             results.append({
+                "情报ID": raw_id if raw_id is not None else "入库失败",
                 "平台": item.platform,
+                "频道": item.group_id or (item.metadata or {}).get("keyword", "-"),
                 "内容": (item.content_raw or "")[:120],
                 "作者": item.author_username or "-",
                 "点赞": item.like_count,
@@ -80,11 +85,82 @@ def _do_collect(platform: str, keywords: list[str], max_pages: int, fetch_replie
             })
             if len(results) % 5 == 0:
                 logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 已采集 {len(results)} 条...")
-        logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] 采集完成，共 {len(results)} 条")
+        logs.append(
+            f"[{datetime.now().strftime('%H:%M:%S')}] 采集完成，共 {len(results)} 条，成功入库 {inserted_count} 条"
+        )
     except Exception as exc:
         logs.append(f"[ERROR] {exc}")
 
     return results, logs
+
+
+def _intel_item_to_insert_dict(item, keywords: list[str], crawl_batch_id: str) -> dict:
+    """把前端采集得到的 IntelItem 转成 ods_raw_intel 入库结构。"""
+    metadata = dict(getattr(item, "metadata", {}) or {})
+    keyword = metadata.get("keyword") or _match_keyword(item.content_raw or "", keywords)
+    source_channel = (
+        getattr(item, "group_id", "")
+        or metadata.get("bar_name")
+        or metadata.get("group_name")
+        or metadata.get("keyword")
+        or keyword
+        or ""
+    )
+    image_urls = list(getattr(item, "image_urls", []) or [])
+    video_cover_url = getattr(item, "video_cover_url", "") or ""
+    media_urls = image_urls + ([video_cover_url] if video_cover_url else [])
+
+    metadata.update({
+        "ui_collect": True,
+        "keywords": keywords,
+        "keyword": keyword,
+        "group_id": getattr(item, "group_id", ""),
+        "message_id": getattr(item, "message_id", None),
+        "post_id": getattr(item, "post_id", ""),
+        "like_count": int(getattr(item, "like_count", 0) or 0),
+        "comment_count": int(getattr(item, "comment_count", 0) or 0),
+        "share_count": int(getattr(item, "share_count", 0) or 0),
+        "collect_count": int(getattr(item, "collect_count", 0) or 0),
+        "tags": list(getattr(item, "tags", []) or []),
+        "comments_count": len(getattr(item, "comments", []) or []),
+        "price": float(getattr(item, "price", 0.0) or 0.0),
+        "seller_rating": getattr(item, "seller_rating", ""),
+        "location": getattr(item, "location", ""),
+        "listing_status": getattr(item, "listing_status", ""),
+    })
+
+    return {
+        "source_platform": getattr(item, "platform", "unknown") or "unknown",
+        "source_channel": source_channel,
+        "source_url": getattr(item, "source_url", "") or "",
+        "source_keyword": keyword,
+        "author_id": str(getattr(item, "author_uid", "") or ""),
+        "author_name": getattr(item, "author_username", "") or "",
+        "publish_time": getattr(item, "collected_at", None),
+        "collect_time": datetime.now(),
+        "content_type": getattr(item, "content_type", "text") or "text",
+        "content_raw": getattr(item, "content_raw", "") or "",
+        "media_urls": media_urls,
+        "media_hash": _media_hash(media_urls),
+        "crawl_batch_id": crawl_batch_id,
+        "raw_status": "RAW_COLLECTED",
+        "metadata": metadata,
+    }
+
+
+def _match_keyword(text: str, keywords: list[str]) -> str:
+    """根据正文反推命中的搜索词，找不到则取第一个搜索词。"""
+    for kw in keywords:
+        if kw and kw in text:
+            return kw
+    return keywords[0] if keywords else ""
+
+
+def _media_hash(media_urls: list[str]) -> str:
+    if not media_urls:
+        return ""
+    joined = "|".join(str(url) for url in media_urls if url)
+    return hashlib.md5(joined.encode("utf-8")).hexdigest() if joined else ""
 
 
 # ── 页面入口 ────────────────────────────────────────────────────────────────
@@ -186,7 +262,20 @@ def show():
         pname = PLATFORMS.get(st.session_state.get("last_platform", ""), {}).get("name", "")
         st.markdown(f"### 采集结果 · {pname}（{len(st.session_state['last_results'])} 条）")
         df = pd.DataFrame(st.session_state["last_results"])
-        st.dataframe(df, hide_index=True, use_container_width=True)
+        display_columns = ["情报ID", "平台", "频道", "内容", "作者", "点赞", "评论", "转发", "爬取时间", "链接"]
+        for col in display_columns:
+            if col not in df.columns:
+                df[col] = "旧结果未记录" if col == "情报ID" else "-"
+        st.dataframe(
+            df[display_columns],
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "情报ID": st.column_config.TextColumn("情报ID", width="small"),
+                "内容": st.column_config.TextColumn("内容", width="large"),
+                "链接": st.column_config.LinkColumn("链接", width="medium"),
+            },
+        )
 
     if st.session_state.get("last_logs"):
         with st.expander("采集日志", expanded=False):
@@ -213,11 +302,6 @@ def show():
                 """,
                 unsafe_allow_html=True,
             )
-
-    st.markdown("---")
-    from ui.views import intel_pool
-    intel_pool.render_pool(include_header=False)
-
 
 # ── 辅助函数 ────────────────────────────────────────────────────────────────
 

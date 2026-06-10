@@ -267,7 +267,7 @@ class CleaningPipeline:
              （短文本（<30字）即使距离近也可能只是同作者的不同帖子/标题，不判重）
           2. 不同作者 + 汉明距离 ≤ threshold → SIMILAR
              （多人发同一内容=情报线索，保留！）
-          3. 无作者信息 + 汉明距离 ≤ threshold → 保守：不判定为重复
+          3. 无作者信息 → 归入 __unknown__，仅对精确/近似重复内容判重
           4. 汉明距离 > threshold → UNIQUE
 
         Returns:
@@ -277,9 +277,8 @@ class CleaningPipeline:
         result = {"is_duplicate": False, "is_similar": False,
                   "similar_to": "", "dup_type": None}
 
-        # 如果没有作者信息，不做去重判定（保守策略：不因缺元数据而丢情报）
-        if not author_uid or not author_uid.strip():
-            return result
+        # 无作者信息时归入 __unknown__，用于同批完全重复文本的保守去重。
+        author_uid = (author_uid or "").strip() or "__unknown__"
 
         # 短文本放宽阈值：短标题/短消息即使距离近也可能是不同内容
         text_len = len(text) if text else 0
@@ -315,11 +314,11 @@ class CleaningPipeline:
         return result
 
     def _record_hash(self, simhash: str, author_uid: str = "", summary: str = ""):
-        """记录 hash，关联作者。无作者信息时不做关联记录（避免跨条目误判）。"""
+        """记录 hash，关联作者。无作者信息时归入 __unknown__，用于同批去重。"""
         if simhash not in self._seen_authors:
             self._seen_authors[simhash] = {}
-        if author_uid and author_uid.strip():
-            self._seen_authors[simhash][author_uid] = summary[:80] if summary else ""
+        author_uid = (author_uid or "").strip() or "__unknown__"
+        self._seen_authors[simhash][author_uid] = summary[:80] if summary else ""
 
     # 兼容旧接口
     def _is_duplicate(self, new_hash: str) -> tuple[bool, Optional[str]]:
@@ -384,6 +383,141 @@ class CleaningPipeline:
 
         return "unknown"
 
+    # ── 情报相关性闸门 ─────────────────────────────────────────────────
+    #
+    # 注意：噪声评分解决的是“文本质量”问题，相关性闸门解决的是“这条内容
+    # 是否值得进入黑灰产研判”问题。比如“华西黄牛”虽然命中“黄牛”，但没有
+    # 联系方式、交易动作、工具资产或可追踪实体，不能算一条可行动情报。
+    STRONG_RISK_TERMS = [
+        "接码", "跑分", "刷单", "洗钱", "料子", "料商", "号商", "卡商",
+        "猫池", "群控", "撞库", "脱库", "木马", "病毒", "免杀", "后门",
+        "代理IP", "云手机", "无人直播", "打码", "养号", "解封", "代实名",
+        "代下", "代收", "代付", "四件套", "八件套", "USDT", "虚拟币",
+        "黑产", "灰产", "私彩", "盘口", "水房", "刷量", "涨粉", "真人粉",
+        "DDoS", "DDOS", "C2", "肉鸡", "僵尸网络", "botnet",
+        "Q号", "QQ号", "老号", "换绑", "实名账号",
+    ]
+    WEAK_AMBIGUOUS_TERMS = [
+        "黄牛", "羊毛", "兼职", "车", "群", "粉", "流量", "红包", "返利",
+        "活动", "福利", "挂号",
+    ]
+    ACTOR_ACTION_TERMS = [
+        "出售", "收购", "买号", "卖号", "出号", "收号", "接单", "放单",
+        "招聘", "招募", "日结", "一单", "每单", "佣金",
+        "价格", "报价", "低价", "批发", "量大", "包教", "教程", "全套",
+        "下载", "接单", "下单", "上车", "下车", "需要的来", "懂的来",
+        "私我", "加我", "联系我", "看主页", "主页",
+    ]
+    CONTACT_OR_ASSET_PATTERNS = [
+        re.compile(r"https?://|t\.me/|telegram|linktr\.ee|短链接|二维码", re.I),
+        re.compile(r"(微信|VX|vx|V信|加V|加v|QQ|扣扣|TG|tg|纸飞机)[:：]?\s*[@A-Za-z0-9_\-]{3,}"),
+        re.compile(r"@[A-Za-z0-9_]{4,}"),
+        re.compile(r"\b1[3-9]\d{9}\b"),
+        re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
+    ]
+    PUBLIC_WARNING_TERMS = [
+        "警惕", "提醒", "通报", "新闻", "警方", "公安", "检察", "法院",
+        "反诈", "官方", "辟谣", "曝光", "记者", "本报讯", "近日",
+    ]
+
+    @classmethod
+    def _step_relevance(cls, text: str, source_keyword: str = "",
+                        content_role: str = "unknown") -> dict:
+        """判断清洗后文本是否是一条可进入研判的黑灰产情报。"""
+        compact = re.sub(r"\s+", "", text or "")
+        compact = compact.replace("【标题】", "").replace("【正文内容】", "")
+        compact = compact.replace("[标题]", "").replace("[正文内容]", "")
+
+        strong_hits = [kw for kw in cls.STRONG_RISK_TERMS if kw in text]
+        weak_hits = [kw for kw in cls.WEAK_AMBIGUOUS_TERMS if kw in text]
+        action_hits = [kw for kw in cls.ACTOR_ACTION_TERMS if kw in text]
+        contact_hits = [p.pattern for p in cls.CONTACT_OR_ASSET_PATTERNS if p.search(text)]
+        warning_hits = [kw for kw in cls.PUBLIC_WARNING_TERMS if kw in text]
+
+        score = 0.0
+        score += min(len(strong_hits) * 0.28, 0.70)
+        score += min(len(action_hits) * 0.18, 0.45)
+        score += min(len(weak_hits) * 0.10, 0.20)
+        if contact_hits:
+            score += 0.45
+        if source_keyword and source_keyword in text and (strong_hits or action_hits or contact_hits):
+            score += 0.08
+
+        reasons: list[str] = []
+
+        if content_role in {"police", "media"} and not contact_hits and not action_hits:
+            return {
+                "is_relevant": False,
+                "relevance_score": 0.12,
+                "relevance_reason": "媒体/警方提示类内容，缺少可追踪实体或交易动作",
+                "strong_hits": strong_hits,
+                "weak_hits": weak_hits,
+                "action_hits": action_hits,
+                "contact_hit_count": len(contact_hits),
+                "warning_hits": warning_hits,
+            }
+
+        if len(compact) <= 14 and weak_hits and not strong_hits and not action_hits and not contact_hits:
+            return {
+                "is_relevant": False,
+                "relevance_score": 0.10,
+                "relevance_reason": "短文本仅命中弱风险词，缺少交易、联系、工具或引流信号",
+                "strong_hits": strong_hits,
+                "weak_hits": weak_hits,
+                "action_hits": action_hits,
+                "contact_hit_count": len(contact_hits),
+                "warning_hits": warning_hits,
+            }
+
+        if not strong_hits and not action_hits and not contact_hits:
+            return {
+                "is_relevant": False,
+                "relevance_score": 0.08,
+                "relevance_reason": "未发现黑灰产核心词、交易动作或可追踪实体",
+                "strong_hits": strong_hits,
+                "weak_hits": weak_hits,
+                "action_hits": action_hits,
+                "contact_hit_count": len(contact_hits),
+                "warning_hits": warning_hits,
+            }
+
+        if not strong_hits and not contact_hits and score < 0.28:
+            return {
+                "is_relevant": False,
+                "relevance_score": round(max(0.0, min(1.0, score)), 4),
+                "relevance_reason": "仅命中弱动作词，缺少核心风险词或可追踪实体",
+                "strong_hits": strong_hits,
+                "weak_hits": weak_hits,
+                "action_hits": action_hits,
+                "contact_hit_count": len(contact_hits),
+                "warning_hits": warning_hits,
+            }
+
+        if warning_hits and not contact_hits and not action_hits:
+            score -= 0.25
+            reasons.append("含预警/新闻提示词但缺少行动线索")
+
+        is_relevant = score >= 0.28 or bool(contact_hits)
+        if strong_hits:
+            reasons.append("命中核心风险词：" + "、".join(strong_hits[:4]))
+        if action_hits:
+            reasons.append("命中交易/招募动作：" + "、".join(action_hits[:4]))
+        if contact_hits:
+            reasons.append("发现联系方式/链接/资产线索")
+        if weak_hits and not strong_hits:
+            reasons.append("仅命中弱风险词：" + "、".join(weak_hits[:4]))
+
+        return {
+            "is_relevant": is_relevant,
+            "relevance_score": round(max(0.0, min(1.0, score)), 4),
+            "relevance_reason": "；".join(reasons) if reasons else "相关性规则通过",
+            "strong_hits": strong_hits,
+            "weak_hits": weak_hits,
+            "action_hits": action_hits,
+            "contact_hit_count": len(contact_hits),
+            "warning_hits": warning_hits,
+        }
+
     # ── Step 4: 噪声评分 ────────────────────────────────────────────────
 
     @staticmethod
@@ -410,6 +544,7 @@ class CleaningPipeline:
 
     def clean_single(self, platform: str, text: str,
                      author_uid: str = "", author_username: str = "",
+                     source_keyword: str = "",
                      skip_dedup: bool = True) -> dict:
         """单条清洗。
 
@@ -438,6 +573,7 @@ class CleaningPipeline:
                     "platform": {...},
                     "normalize": {...},
                     "score": {...},
+                    "relevance": {...},
                     "priority": {...},
                 },
             }
@@ -473,7 +609,7 @@ class CleaningPipeline:
             stripped = text.strip()
             for mp in MEDIA_PLACEHOLDERS:
                 stripped = stripped.replace(mp, "")
-            if len(stripped.strip()) <= 2:
+            if stripped_strip and len(stripped.strip()) <= 2:
                 is_media_only = True
 
         # Step 0: Emoji 提取
@@ -510,6 +646,14 @@ class CleaningPipeline:
         # ── 内容角色检测 ──
         content_role = self.detect_content_role(text_cleaned, author_username, platform)
 
+        # ── 情报相关性检测 ──
+        relevance_result = self._step_relevance(
+            text_cleaned,
+            source_keyword=source_keyword,
+            content_role=content_role,
+        )
+        steps["relevance"] = relevance_result
+
         # ── 综合判断 ──
         if is_qq_media_noise:
             # QQ 嵌入媒体 [image:xxx]/[CQ:xxx]：无法获取实际内容，直接丢弃
@@ -521,6 +665,7 @@ class CleaningPipeline:
             is_noise = (
                 platform_result["is_platform_noise"]
                 or score_result["noise_score"] >= 0.6
+                or not relevance_result["is_relevant"]
                 or len(text_cleaned.strip()) < 3
             )
 
@@ -529,6 +674,8 @@ class CleaningPipeline:
             noise_reason_parts.append(platform_result["platform_noise_reason"])
         if score_result["noise_reasons"]:
             noise_reason_parts.append("; ".join(score_result["noise_reasons"]))
+        if not relevance_result["is_relevant"] and not is_media_only:
+            noise_reason_parts.append(relevance_result["relevance_reason"])
         if len(text_cleaned.strip()) < 3 and not is_media_only:
             noise_reason_parts.append("文本过短(<3字符)")
 
@@ -537,6 +684,10 @@ class CleaningPipeline:
             noise_reason_parts.append("QQ嵌入媒体(无法获取图片/视频内容)")
         elif is_media_only and not noise_reason_parts:
             noise_reason_parts.append("纯媒体占位消息")
+
+        effective_noise_score = score_result["noise_score"]
+        if not relevance_result["is_relevant"] and not is_media_only:
+            effective_noise_score = max(effective_noise_score, 0.85)
 
         return {
             "text": text_cleaned,
@@ -547,7 +698,9 @@ class CleaningPipeline:
             "is_media_only": is_media_only,
             "content_role": content_role,
             "noise_reason": " | ".join(noise_reason_parts) if noise_reason_parts else "",
-            "noise_score": score_result["noise_score"],
+            "noise_score": round(effective_noise_score, 4),
+            "relevance_score": relevance_result["relevance_score"],
+            "relevance_reason": relevance_result["relevance_reason"],
             "priority": priority_result["priority"],
             "should_discard": is_noise,  # 不含去重判定，在 clean_batch 中合并
             "steps": steps,
@@ -583,11 +736,13 @@ class CleaningPipeline:
             raw_text = item.get("content_raw", "")
             author_uid = item.get("author_uid", "")
             author_username = item.get("author_username", "")
+            source_keyword = item.get("source_keyword", "")
 
             # 单条清洗
             single = self.clean_single(platform, raw_text,
                                        author_uid=author_uid,
                                        author_username=author_username,
+                                       source_keyword=source_keyword,
                                        skip_dedup=True)
 
             # ── 作者感知去重检查 ──
@@ -644,6 +799,8 @@ class CleaningPipeline:
                 "content_role": single["content_role"],
                 "should_discard": status == "DISCARDED",
                 "noise_score": single["noise_score"],
+                "relevance_score": single.get("relevance_score", 0),
+                "relevance_reason": single.get("relevance_reason", ""),
                 "noise_reason": single["noise_reason"],
                 "priority": single["priority"],
                 "status": status,
@@ -671,7 +828,7 @@ class CleaningPipeline:
 
     def process(self, raw_text: str, existing_hashes: list[str] = None,
                 platform: str = "unknown", author_uid: str = "",
-                author_username: str = "") -> dict:
+                author_username: str = "", source_keyword: str = "") -> dict:
         """清洗单条数据，返回完整结果。
 
         供 main.py clean 命令和 UI 清洗页面使用。
@@ -679,7 +836,8 @@ class CleaningPipeline:
         # 先用新管道清洗
         result = self.clean_single(platform, raw_text,
                                    author_uid=author_uid,
-                                   author_username=author_username)
+                                   author_username=author_username,
+                                   source_keyword=source_keyword)
 
         # 作者感知去重检查
         dedup = self._check_duplicate(result["simhash"], author_uid, result["text"])
@@ -697,9 +855,13 @@ class CleaningPipeline:
                 "content_role": result["content_role"],
                 "is_noise": False,
                 "noise_reason": result["noise_reason"],
+                "noise_score": result["noise_score"],
+                "relevance_score": result.get("relevance_score", 0),
+                "relevance_reason": result.get("relevance_reason", ""),
                 "priority": result["priority"],
                 "should_discard": False,  # MEDIA_ONLY 不丢弃
                 "status": "MEDIA_ONLY",
+                "steps": result["steps"],
             }
 
         # 作者感知去重判定
@@ -714,9 +876,13 @@ class CleaningPipeline:
                 "content_role": result["content_role"],
                 "is_noise": result["is_noise"],
                 "noise_reason": f"作者重复({dedup.get('dup_type', '')}) | {result['noise_reason']}",
+                "noise_score": result["noise_score"],
+                "relevance_score": result.get("relevance_score", 0),
+                "relevance_reason": result.get("relevance_reason", ""),
                 "priority": result["priority"],
                 "should_discard": True,
                 "status": "DISCARDED",
+                "steps": result["steps"],
             }
 
         if dedup["is_similar"]:
@@ -732,9 +898,13 @@ class CleaningPipeline:
                 "content_role": result["content_role"],
                 "is_noise": result["is_noise"],
                 "noise_reason": result["noise_reason"],
+                "noise_score": result["noise_score"],
+                "relevance_score": result.get("relevance_score", 0),
+                "relevance_reason": result.get("relevance_reason", ""),
                 "priority": result["priority"],
                 "should_discard": result["should_discard"],
-                "status": "SIMILAR" if not result["should_discard"] and not dup_legacy else "DISCARDED",
+                "status": "SIMILAR" if not result["should_discard"] else "DISCARDED",
+                "steps": result["steps"],
             }
 
         # 全新内容
@@ -749,9 +919,13 @@ class CleaningPipeline:
             "content_role": result["content_role"],
             "is_noise": result["is_noise"],
             "noise_reason": result["noise_reason"],
+            "noise_score": result["noise_score"],
+            "relevance_score": result.get("relevance_score", 0),
+            "relevance_reason": result.get("relevance_reason", ""),
             "priority": result["priority"],
             "should_discard": result["should_discard"],
-            "status": "CLEANED" if not result["should_discard"] and not dup_legacy else "DISCARDED",
+            "status": "CLEANED" if not result["should_discard"] else "DISCARDED",
+            "steps": result["steps"],
         }
 
     # 保留旧版的静态方法兼容

@@ -140,13 +140,13 @@ def overview_stats() -> dict:
                          DATE(DATE_ADD(NOW(), INTERVAL 8 HOUR))"""
             )
             today_received = c.fetchone()["cnt"]
-        # Merge SCREENED → RAW_COLLECTED (legacy status)
-        screened = status_counts.pop("SCREENED", 0)
-        status_counts["RAW_COLLECTED"] = status_counts.get("RAW_COLLECTED", 0) + screened
         return {
             "status_counts": status_counts,
             "total_raw": sum(status_counts.values()),
             "pending": status_counts.get("RAW_COLLECTED", 0) + status_counts.get("CLEANED", 0),
+            "raw_collected": status_counts.get("RAW_COLLECTED", 0),
+            "cleaned": status_counts.get("CLEANED", 0),
+            "screened": status_counts.get("SCREENED", 0),
             "running": status_counts.get("ANALYZING", 0),
             "analyzed": status_counts.get("ANALYZED", 0),
             "failed": status_counts.get("FAILED", 0),
@@ -162,6 +162,8 @@ def overview_stats() -> dict:
             "status_counts": {},
             "total_raw": 0,
             "pending": 0,
+            "raw_collected": 0,
+            "cleaned": 0,
             "running": 0,
             "screened": 0,
             "analyzed": 0,
@@ -643,6 +645,7 @@ def list_intel(
     keyword: str = "",
     limit: int = 200,
     order_by: str = "id_desc",
+    screen_decision: str | None = None,
 ) -> list[dict]:
     where = []
     params = []
@@ -653,6 +656,9 @@ def list_intel(
         where.append("(o.content_raw LIKE %s OR o.author_name LIKE %s OR o.source_channel LIKE %s)")
         like = f"%{keyword}%"
         params.extend([like, like, like])
+    if screen_decision:
+        where.append("JSON_UNQUOTE(JSON_EXTRACT(o.metadata, '$.screen_decision'))=%s")
+        params.append(screen_decision)
     clause = "WHERE " + " AND ".join(where) if where else ""
     order_sql = "o.id DESC"
     if order_by == "recent_activity":
@@ -665,6 +671,8 @@ def list_intel(
                 f"""
                 SELECT o.id, o.source_platform, o.source_channel, o.author_name,
                        o.content_raw, o.raw_status, o.collect_time,
+                       JSON_UNQUOTE(JSON_EXTRACT(o.metadata, '$.screen_decision')) AS screen_decision,
+                       JSON_UNQUOTE(JSON_EXTRACT(o.metadata, '$.screen_reason')) AS screen_reason,
                        a.risk_label, a.risk_sub_label, a.risk_score, a.risk_level,
                        a.classification_method,
                        DATE_ADD(a.created_at, INTERVAL 8 HOUR) AS analyzed_at
@@ -938,6 +946,7 @@ def run_cleaning(raw_ids: list[int]) -> dict:
                     "content_raw": row.get("content_raw") or "",
                     "author_uid": row.get("author_id") or "",
                     "author_username": row.get("author_name") or "",
+                    "source_keyword": row.get("source_keyword") or "",
                 })
         except Exception:
             pass
@@ -955,19 +964,31 @@ def run_cleaning(raw_ids: list[int]) -> dict:
                 platform=item["platform"],
                 author_uid=item["author_uid"],
                 author_username=item["author_username"],
+                source_keyword=item.get("source_keyword", ""),
             )
 
             status = result.get("status", "CLEANED" if not result["should_discard"] else "DISCARDED")
 
             if status == "DISCARDED":
                 mysql.update_raw_status(item["id"], "DISCARDED",
-                                        clean_text=result["text"])
+                                        clean_text=result["text"],
+                                        simhash=result.get("simhash"),
+                                        noise_score=result.get("noise_score"),
+                                        clean_reason=result.get("noise_reason", ""))
+                mysql.mark_screen_decision(
+                    item["id"],
+                    "CLEANING_DISCARDED",
+                    result.get("noise_reason", "清洗阶段判定为噪声或重复"),
+                    risk_score=float(result.get("noise_score") or 0),
+                )
                 discarded += 1
             else:
                 mysql.update_raw_status(
                     item["id"], "CLEANED",
                     clean_text=result["text"],
                     simhash=result["simhash"],
+                    noise_score=result.get("noise_score"),
+                    clean_reason=result.get("noise_reason", ""),
                 )
                 if status == "MEDIA_ONLY":
                     media_only += 1
@@ -986,6 +1007,7 @@ def run_cleaning(raw_ids: list[int]) -> dict:
                 "status": status,
                 "noise_reason": result.get("noise_reason", ""),
                 "noise_score": result.get("noise_score", 0),
+                "relevance_score": result.get("relevance_score", 0),
                 "is_duplicate": result.get("is_duplicate", False),
                 "is_similar": result.get("is_similar", False),
                 "similar_to": result.get("similar_to", ""),
@@ -1043,10 +1065,11 @@ def get_cleaning_preview(raw_id: int) -> dict | None:
 
     platform = raw_row.get("source_platform") or "unknown"
     original = raw_row.get("content_raw") or ""
+    source_keyword = raw_row.get("source_keyword") or ""
 
     # 单条清洗
     pipeline = CleaningPipeline()
-    result = pipeline.clean_single(platform, original)
+    result = pipeline.clean_single(platform, original, source_keyword=source_keyword)
 
     return {
         "raw_id": raw_id,
@@ -1071,5 +1094,6 @@ def get_cleaning_preview(raw_id: int) -> dict | None:
                 "noise_score": result["steps"]["score"]["noise_score"],
                 "noise_reasons": result["steps"]["score"]["noise_reasons"],
             },
+            "relevance": result["steps"].get("relevance", {}),
         },
     }

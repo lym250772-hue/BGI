@@ -25,7 +25,7 @@ def _business_status_from_options(options: dict | None) -> str:
         and not opts.get("enable_embedding", False)
         and not opts.get("enable_graph_expand", True)
     )
-    if "快速" in mode or fast_flags:
+    if "快速" in mode or "初筛" in mode or "分层" in mode or fast_flags:
         return "SCREENED"
     return "ANALYZED"
 
@@ -38,40 +38,103 @@ def _entity_types(result: dict) -> set[str]:
     return types
 
 
+_EXPANDABLE_TYPES = {
+    "wechat", "qq", "telegram", "phone", "email", "bank_card",
+    "alipay", "url", "domain", "ip", "crypto_wallet", "tool",
+}
+
+
+def _screen_decision(result: dict, options: dict | None) -> dict | None:
+    """Classify a quick-screening result into the next business action."""
+    opts = options or {}
+    mode = str(opts.get("analysis_mode") or "")
+    is_quick = (
+        "初筛" in mode
+        or "快速" in mode
+        or "分层" in mode
+        or _business_status_from_options(opts) == "SCREENED"
+    )
+    if not is_quick:
+        return None
+
+    risk_score = float(result.get("risk_score") or 0)
+    risk_level = str(result.get("risk_level") or "")
+    classification_confidence = float(result.get("classification_confidence") or 0)
+    classification_method = str(result.get("classification_method") or "")
+    candidates = result.get("new_slang_candidates") or []
+    evidence = result.get("evidence_spans") or []
+    entity_types = _entity_types(result)
+    has_expandable = bool(entity_types & _EXPANDABLE_TYPES)
+
+    low_threshold = float(opts.get("low_risk_threshold") or 0.2)
+    standard_threshold = float(opts.get("standard_threshold") or 0.45)
+    graph_threshold = float(opts.get("graph_threshold") or 0.55)
+    confirm_threshold = float(opts.get("confirm_threshold") or 0.72)
+
+    if has_expandable and (risk_score >= graph_threshold or risk_level in {"high", "critical"}):
+        return {
+            "decision": "NEED_GRAPH_ANALYSIS",
+            "reason": f"风险分 {risk_score:.2f}，且发现可扩线实体：{', '.join(sorted(entity_types & _EXPANDABLE_TYPES))}",
+        }
+
+    if candidates:
+        return {
+            "decision": "NEED_STANDARD_ANALYSIS",
+            "reason": f"发现疑似新黑话 {len(candidates)} 个，需要二轮研判确认释义与风险",
+        }
+
+    if (
+        risk_score >= confirm_threshold
+        and classification_confidence >= 0.85
+        and evidence
+        and classification_method in {"keyword", "regex", "degraded"}
+    ):
+        return {
+            "decision": "CONFIRMED_RISK",
+            "reason": (
+                f"规则/词典高置信命中，分类置信度 {classification_confidence:.2f}，"
+                f"风险分 {risk_score:.2f}，已抽取证据片段，可直接定案"
+            ),
+        }
+
+    if (
+        risk_score >= standard_threshold
+        or risk_level in {"high", "critical"}
+        or (risk_score >= low_threshold and (has_expandable or evidence))
+    ):
+        reason_parts = [f"风险分 {risk_score:.2f}"]
+        if has_expandable:
+            reason_parts.append("存在账号/联系方式/链接等关键线索")
+        if evidence:
+            reason_parts.append("已提取风险证据片段")
+        return {
+            "decision": "NEED_STANDARD_ANALYSIS",
+            "reason": "；".join(reason_parts),
+        }
+
+    if risk_score < low_threshold and not has_expandable and not candidates and not evidence:
+        return {
+            "decision": "LOW_RISK_ARCHIVED",
+            "reason": f"风险分 {risk_score:.2f} 低于 {low_threshold:.2f}，未发现关键实体、新黑话或证据片段",
+        }
+
+    return {
+        "decision": "SCREENED_REVIEW",
+        "reason": f"风险分 {risk_score:.2f}，未达到自动深研判条件，建议人工抽查",
+    }
+
+
 def _choose_followup_options(result: dict, options: dict | None) -> dict | None:
     """Decide whether a quick-screened item should enter a deeper second pass."""
     opts = options or {}
     if not opts.get("auto_escalate"):
         return None
 
-    mode = str(opts.get("analysis_mode") or "")
-    is_quick = "初筛" in mode or "快速" in mode or _business_status_from_options(opts) == "SCREENED"
-    if not is_quick:
+    decision = _screen_decision(result, opts)
+    if not decision:
         return None
 
-    risk_score = float(result.get("risk_score") or 0)
-    risk_level = str(result.get("risk_level") or "")
-    candidates = result.get("new_slang_candidates") or []
-    entity_types = _entity_types(result)
-    expandable_types = {
-        "wechat", "qq", "telegram", "phone", "email", "bank_card",
-        "alipay", "url", "domain", "ip", "crypto_wallet", "tool",
-    }
-    has_expandable = bool(entity_types & expandable_types)
-    standard_threshold = float(opts.get("standard_threshold") or 0.45)
-    graph_threshold = float(opts.get("graph_threshold") or 0.55)
-
-    should_standard = (
-        risk_score >= standard_threshold
-        or risk_level in {"high", "critical"}
-        or bool(candidates)
-    )
-    should_graph = has_expandable and (
-        risk_score >= graph_threshold
-        or risk_level in {"high", "critical"}
-    )
-
-    if should_graph:
+    if decision["decision"] == "NEED_GRAPH_ANALYSIS":
         return {
             "enable_llm": True,
             "enable_roberta": True,
@@ -81,7 +144,7 @@ def _choose_followup_options(result: dict, options: dict | None) -> dict | None:
             "analysis_mode": "自动扩线研判",
             "auto_escalate": False,
         }
-    if should_standard:
+    if decision["decision"] == "NEED_STANDARD_ANALYSIS":
         return {
             "enable_llm": True,
             "enable_roberta": True,
@@ -155,12 +218,28 @@ def submit_analysis(job_id: str, raw_id: int, text: str, platform: str = "unknow
             if not final_result:
                 raise RuntimeError("analysis stream finished without final result")
 
+            decision = _screen_decision(final_result, opts)
+            followup_options = _choose_followup_options(final_result, opts)
             target_status = final_result.get("raw_status") or _business_status_from_options(opts)
+            if decision and opts.get("auto_escalate"):
+                if followup_options:
+                    target_status = "ANALYZING"
+                elif decision["decision"] in {"LOW_RISK_ARCHIVED", "CONFIRMED_RISK"}:
+                    target_status = "ANALYZED"
+                else:
+                    target_status = "SCREENED"
+
             mysql.update_raw_status(raw_id, target_status)
+            if decision:
+                mysql.mark_screen_decision(
+                    raw_id,
+                    decision["decision"],
+                    decision["reason"],
+                    risk_score=float(final_result.get("risk_score") or 0),
+                )
             mysql.update_job_status(job_id, status="success", progress=100,
                                     current_step="done",
                                     result_analysis_id=final_result.get("analysis_id"))
-            followup_options = _choose_followup_options(final_result, opts)
             if followup_options:
                 followup_id = mysql.create_job(raw_id, text, platform, options=followup_options)
                 mysql.update_job_status(

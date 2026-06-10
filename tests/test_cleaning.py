@@ -319,6 +319,44 @@ class TestCleaningPipeline:
             result = p.clean_single(platform, text)
             assert result["should_discard"], f"应丢弃 {desc}: {text[:50]}"
 
+    def test_short_weak_keyword_is_discarded(self):
+        """只命中弱风险词、没有交易动作和联系方式的短标题不进入研判。"""
+        from cleaner.pipeline import CleaningPipeline
+        p = CleaningPipeline()
+        result = p.clean_single(
+            "xiaohongshu",
+            "【标题】华西黄牛",
+            author_username="羊洋扬",
+            source_keyword="黄牛",
+        )
+        assert result["should_discard"]
+        assert "短文本仅命中弱风险词" in result["noise_reason"]
+
+    def test_actionable_keyword_with_contact_is_kept(self):
+        """有核心风险词、交易动作和联系方式的内容要保留。"""
+        from cleaner.pipeline import CleaningPipeline
+        p = CleaningPipeline()
+        result = p.clean_single(
+            "telegram",
+            "接码平台推荐，海外实体卡，包教包会，联系微信 douyin_pro888",
+            source_keyword="接码",
+        )
+        assert not result["should_discard"]
+        assert result["relevance_score"] >= 0.3
+
+    def test_public_warning_without_traceable_entity_is_discarded(self):
+        """官方/媒体预警类内容没有联系方式或交易动作时不进入研判池。"""
+        from cleaner.pipeline import CleaningPipeline
+        p = CleaningPipeline()
+        result = p.clean_single(
+            "weibo",
+            "警惕刷单兼职类诈骗，公安提醒全民反诈",
+            author_username="平安检察",
+            source_keyword="刷单",
+        )
+        assert result["should_discard"]
+        assert "媒体/警方提示类内容" in result["noise_reason"]
+
     def test_intel_items_kept(self):
         """各平台的情报样本都应该保留。"""
         from cleaner.pipeline import CleaningPipeline

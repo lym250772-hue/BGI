@@ -6,7 +6,7 @@ import streamlit as st
 import ui.labels as L
 import ui.theme as T
 from ui import data
-from ui.components import auto_refresh, page_header, raw_status_badge, risk_badge, service_strip
+from ui.components import intel_status_badge, page_header, raw_status_badge, risk_badge, service_strip
 
 
 QUICK_QUESTIONS = [
@@ -25,7 +25,7 @@ def _recent_table(rows: list[dict]) -> pd.DataFrame:
             "来源": r.get("source_platform") or "-",
             "作者": r.get("author_name") or "-",
             "内容摘要": r.get("content_preview") or "",
-            "处理状态": L.raw_status_label(r.get("raw_status")),
+            "处理状态": L.intel_status_label(r.get("raw_status"), r.get("screen_decision")),
             "风险类型": r.get("risk_label") or "未分类",
             "风险等级": L.risk_level_label(r.get("risk_level") or ""),
             "研判时间": str(r.get("analyzed_at") or "")[:19] or "-",
@@ -107,12 +107,13 @@ def show():
     )
 
     stats = data.overview_stats()
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("接收总量", stats["total_raw"])
-    c2.metric("待研判", stats["pending"])
-    c3.metric("研判中", stats["running"])
-    c4.metric("已研判", stats["analyzed"])
-    c5.metric("高危情报", stats["high_risk"])
+    c2.metric("待清洗", stats["raw_collected"])
+    c3.metric("待研判", stats["cleaned"])
+    c4.metric("待复核/升级", stats["screened"])
+    c5.metric("已研判", stats["analyzed"])
+    c6.metric("高危情报", stats["high_risk"])
 
     left, right = st.columns([1.25, 1])
     with left:
@@ -174,7 +175,7 @@ def show():
             f"""
             <div class='intel-card' style='margin-top:0.8rem'>
               <div style='display:flex;gap:8px;align-items:center;margin-bottom:6px'>
-                {raw_status_badge(top.get('raw_status'))}
+                {intel_status_badge(top.get('raw_status'), top.get('screen_decision'))}
                 {risk_badge(top.get('risk_level'))}
                 <span class='mono' style='color:{T.MUTED}'>#{top.get('id')}</span>
               </div>
@@ -192,6 +193,3 @@ def show():
     st.divider()
     st.markdown("### 连接状态")
     service_strip(compact=True)
-
-    if data.has_active_jobs():
-        auto_refresh(interval_ms=2500)

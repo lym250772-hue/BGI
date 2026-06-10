@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+import ui.labels as L
 from ui import data
 from ui.components import page_header, service_strip
 
@@ -52,6 +53,7 @@ def _run_cleaning_on_selected(selected_ids: list[int]) -> dict:
                     "content_raw": row.get("content_raw") or "",
                     "author_uid": row.get("author_id") or "",
                     "author_username": row.get("author_name") or "",
+                    "source_keyword": row.get("source_keyword") or "",
                 })
         except Exception:
             pass
@@ -66,18 +68,34 @@ def _run_cleaning_on_selected(selected_ids: list[int]) -> dict:
             platform=item["platform"],
             author_uid=item["author_uid"],
             author_username=item["author_username"],
+            source_keyword=item.get("source_keyword", ""),
         )
 
         status = result.get("status", "CLEANED" if not result["should_discard"] else "DISCARDED")
 
         if status == "DISCARDED":
-            mysql.update_raw_status(item["id"], "DISCARDED", clean_text=result["text"])
+            mysql.update_raw_status(
+                item["id"],
+                "DISCARDED",
+                clean_text=result["text"],
+                simhash=result.get("simhash"),
+                noise_score=result.get("noise_score"),
+                clean_reason=result.get("noise_reason", ""),
+            )
+            mysql.mark_screen_decision(
+                item["id"],
+                "CLEANING_DISCARDED",
+                result.get("noise_reason", "清洗阶段判定为噪声或重复"),
+                risk_score=float(result.get("noise_score") or 0),
+            )
             discarded += 1
         elif status in ("MEDIA_ONLY", "SIMILAR", "CLEANED"):
             mysql.update_raw_status(
                 item["id"], "CLEANED",
                 clean_text=result["text"],
                 simhash=result["simhash"],
+                noise_score=result.get("noise_score"),
+                clean_reason=result.get("noise_reason", ""),
             )
             if status == "MEDIA_ONLY":
                 media_only += 1
@@ -117,6 +135,7 @@ def _run_cleaning_on_selected(selected_ids: list[int]) -> dict:
             "status": status,
             "noise_reason": discard_reason,
             "noise_score": result.get("noise_score", 0),
+            "relevance_score": result.get("relevance_score", 0),
             "content_role": result.get("content_role", "unknown"),
             "is_media_only": result.get("is_media_only", False),
             "similar_to": result.get("similar_to", ""),
@@ -197,17 +216,26 @@ def show():
     page_header("Cleaning", "数据清洗", "v2.0 作者感知去重 · 内容角色五分类 · MEDIA_ONLY 保护")
     service_strip(compact=True)
 
-    # ── Tab 1: 批量清洗 ──────────────────────────────────────────────────
-    tab1, tab2, tab3 = st.tabs(["批量清洗", "清洗预览", "操作日志"])
+    # ── 清洗主流程：待清洗 → 预览 → 情报池/初筛 → 统计 ────────────────
+    tab1, tab2, tab_pool, tab3 = st.tabs([
+        "待清洗队列",
+        "清洗预览",
+        "情报池 / 智能初筛",
+        "清洗统计",
+    ])
 
     with tab1:
         st.markdown("### 批量清洗")
 
+        status_options = {
+            "待清洗": "RAW_COLLECTED",
+            "全部状态": None,
+        }
         col1, col2, col3, col4 = st.columns([1, 1, 1, 0.8])
         with col1:
             status_label = st.selectbox(
                 "数据状态",
-                ["RAW_COLLECTED（待清洗）", "全部待处理"],
+                list(status_options.keys()),
                 key="cleaning_status",
             )
         with col2:
@@ -223,9 +251,7 @@ def show():
             do_clean_all = st.button("🚀 一键清洗", type="primary", use_container_width=True)
 
         # ── 情报列表 ──
-        filter_status = None
-        if status_label == "RAW_COLLECTED（待清洗）":
-            filter_status = "RAW_COLLECTED"
+        filter_status = status_options[status_label]
         filter_platform = None if platform == "全部" else platform
 
         rows = data.list_intel(status=filter_status, keyword="", limit=limit)
@@ -241,7 +267,7 @@ def show():
                     "平台": r.get("source_platform") or "-",
                     "作者": r.get("author_name") or "-",
                     "内容摘要": (r.get("content_preview") or r.get("content_raw") or "")[:100],
-                    "状态": r.get("raw_status") or "-",
+                    "状态": L.raw_status_label(r.get("raw_status")),
                 }
                 for r in rows
             ])
@@ -338,7 +364,7 @@ def show():
                         row = {
                             "ID": d["id"],
                             "平台": d["platform"],
-                            "状态": d["status"],
+                            "状态": L.cleaning_status_label(d["status"]),
                             "内容角色": d.get("content_role", ""),
                             "噪声分": f"{d['noise_score']:.2f}",
                         }
@@ -364,7 +390,12 @@ def show():
         if st.session_state.cleaning_preview_id:
             _show_cleaning_preview(st.session_state.cleaning_preview_id)
 
-    # ── Tab 3: 操作日志 / 统计 ────────────────────────────────────────────
+    # ── Tab 3: 情报池 / 智能初筛 ────────────────────────────────────────
+    with tab_pool:
+        from ui.views import intel_pool
+        intel_pool.render_pool(include_header=False)
+
+    # ── Tab 4: 操作日志 / 统计 ────────────────────────────────────────────
     with tab3:
         st.markdown("### 清洗统计")
 
@@ -383,7 +414,7 @@ def show():
 
         if status_rows:
             status_df = pd.DataFrame([
-                {"状态": r["raw_status"], "数量": r["cnt"]}
+                {"状态": L.raw_status_label(r["raw_status"]), "数量": r["cnt"]}
                 for r in status_rows
             ])
             col_a, col_b = st.columns([1, 2])

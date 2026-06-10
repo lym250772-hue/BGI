@@ -14,6 +14,7 @@ Table layering:
 
 import json as _json
 import pymysql
+import re
 import threading
 from contextlib import contextmanager
 from datetime import datetime
@@ -548,7 +549,8 @@ class MySQLStore:
         return normalized if normalized in RAW_STATUSES else "RAW_COLLECTED"
 
     def update_raw_status(self, raw_id: int, status: str,
-                          clean_text: str = None, simhash: str = None):
+                          clean_text: str = None, simhash: str = None,
+                          noise_score: float = None, clean_reason: str = None):
         """Update ods_raw_intel status. If clean_text/simhash provided,
         also upsert into dwd_clean_intel."""
         if not raw_id:
@@ -558,7 +560,48 @@ class MySQLStore:
             c.execute("UPDATE ods_raw_intel SET raw_status=%s WHERE id=%s",
                       (status, raw_id))
         if clean_text or simhash:
-            self.insert_clean_intel(raw_id, clean_text, simhash)
+            self.insert_clean_intel(
+                raw_id,
+                clean_text,
+                simhash,
+                noise_score=noise_score,
+                clean_status=status,
+                clean_reason=clean_reason,
+            )
+
+    def update_raw_metadata(self, raw_id: int, updates: dict):
+        """Merge small decision fields into ods_raw_intel.metadata."""
+        if not raw_id or not updates:
+            return
+        pairs = []
+        params = []
+        for key, value in updates.items():
+            if not re.fullmatch(r"[A-Za-z0-9_]+", str(key)):
+                continue
+            pairs.append(f"'$.{key}', %s")
+            params.append(value)
+        if not pairs:
+            return
+        params.append(raw_id)
+        with self.cursor() as c:
+            c.execute(
+                f"""UPDATE ods_raw_intel
+                    SET metadata=JSON_SET(COALESCE(metadata, JSON_OBJECT()), {', '.join(pairs)})
+                    WHERE id=%s""",
+                params,
+            )
+
+    def mark_screen_decision(self, raw_id: int, decision: str, reason: str,
+                             risk_score: float = None):
+        """Persist the first-pass screening decision without deleting raw data."""
+        updates = {
+            "screen_decision": decision,
+            "screen_reason": (reason or "")[:500],
+            "screened_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        if risk_score is not None:
+            updates["screen_risk_score"] = float(risk_score)
+        self.update_raw_metadata(raw_id, updates)
 
     def mark_raw_analyzing(self, raw_id: int):
         """Mark a raw intelligence row as being actively analyzed."""
@@ -620,7 +663,7 @@ class MySQLStore:
     def get_raw_by_id(self, raw_id: int) -> dict | None:
         """Return one raw intelligence row by primary key."""
         with self.cursor() as c:
-            c.execute("SELECT * FROM ods_raw_intel WHERE id=%s", (raw_id))
+            c.execute("SELECT * FROM ods_raw_intel WHERE id=%s", (raw_id,))
             row = c.fetchone()
             return self._normalize_raw_row(row) if row else None
 
@@ -674,8 +717,11 @@ class MySQLStore:
     def insert_clean_intel(self, raw_id: int, clean_text: str = None,
                            simhash: str = None, **kwargs):
         """Upsert into dwd_clean_intel."""
+        clean_status = kwargs.get("clean_status") or "CLEANED"
+        noise_score = kwargs.get("noise_score")
+        clean_reason = kwargs.get("clean_reason")
         with self.cursor() as c:
-            c.execute("SELECT id FROM dwd_clean_intel WHERE raw_id=%s", (raw_id))
+            c.execute("SELECT id FROM dwd_clean_intel WHERE raw_id=%s", (raw_id,))
             existing = c.fetchone()
             if existing:
                 sets = []
@@ -684,15 +730,29 @@ class MySQLStore:
                     sets.append("clean_text=%s"); params.append(clean_text)
                 if simhash:
                     sets.append("simhash=%s"); params.append(simhash)
+                if clean_status:
+                    sets.append("clean_status=%s"); params.append(clean_status)
+                if noise_score is not None:
+                    sets.append("noise_score=%s"); params.append(float(noise_score))
+                if clean_reason is not None:
+                    sets.append("clean_reason=%s"); params.append(str(clean_reason)[:256])
                 if sets:
                     params.append(raw_id)
                     c.execute(f"UPDATE dwd_clean_intel SET {', '.join(sets)} WHERE raw_id=%s", params)
                 return existing["id"]
             else:
                 c.execute(
-                    """INSERT INTO dwd_clean_intel (raw_id, clean_text, simhash, clean_status)
-                    VALUES (%s, %s, %s, 'CLEANED')""",
-                    (raw_id, clean_text, simhash))
+                    """INSERT INTO dwd_clean_intel
+                       (raw_id, clean_text, simhash, noise_score, clean_status, clean_reason)
+                    VALUES (%s, %s, %s, %s, %s, %s)""",
+                    (
+                        raw_id,
+                        clean_text,
+                        simhash,
+                        float(noise_score) if noise_score is not None else 0,
+                        clean_status,
+                        str(clean_reason)[:256] if clean_reason is not None else None,
+                    ))
                 return c.lastrowid
 
     # ==================================================================

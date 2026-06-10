@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 import ui.labels as L
 import ui.theme as T
@@ -50,6 +49,12 @@ def raw_status_badge(status: str | None) -> str:
     return T.badge(L.raw_status_label(value), T.STATUS_COLORS.get(value, T.MUTED))
 
 
+def intel_status_badge(status: str | None, decision: str | None = "") -> str:
+    value = str(status or "")
+    label = L.intel_status_label(value, str(decision or ""))
+    return T.badge(label, T.STATUS_COLORS.get(value, T.MUTED))
+
+
 def job_status_badge(status: str | None) -> str:
     value = str(status or "")
     return T.badge(L.job_status_label(value), T.STATUS_COLORS.get(value, T.MUTED))
@@ -68,16 +73,5 @@ def empty_panel(title: str, note: str):
 
 
 def auto_refresh(interval_ms: int = 2500):
-    """Schedule a browser-side refresh without blocking page rendering."""
-    interval = max(800, int(interval_ms))
-    components.html(
-        f"""
-        <script>
-          window.setTimeout(function() {{
-            window.parent.location.reload();
-          }}, {interval});
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
+    """Deprecated: kept for compatibility. Use st.fragment for local refresh."""
+    return None
