@@ -8,6 +8,8 @@
 
 ## 整体架构
 
+![智能体整体结构](assets/readme/bgi-system-overview.png)
+
 系统围绕赛题要求的四大模块构建，形成「采集 → 清洗 → 分析 → 输出」的完整闭环：
 
 ```
@@ -57,6 +59,8 @@ UA 池轮换 · webdriver 隐藏 · Cookie 注入 · 随机间隔 · 首页预�
 ---
 
 ## 二、数据清洗 Pipeline
+
+![数据处理链路](assets/readme/bgi-data-pipeline.png)
 
 赛题要求的去重、噪声过滤、高危内容识别全部在一个 **6 步零 LLM 管道** 中完成，不消耗任何 Token：
 
@@ -110,6 +114,8 @@ UA 池轮换 · webdriver 隐藏 · Cookie 注入 · 随机间隔 · 首页预�
 ---
 
 ## 三、智能分析引擎
+
+![研判智能体模块](assets/readme/bgi-agent-state-machine.png)
 
 对应赛题 3.1（风险意图分类）+ 3.2（关键实体抽取）+ 黑话归一。
 
